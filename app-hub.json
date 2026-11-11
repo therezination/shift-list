@@ -1,0 +1,16 @@
+{
+  "name": "Shift List",
+  "description": "Phone checklist for work shifts: morning and evening lists, things to mention, a handover write-up, history and locked codes.",
+  "category": "Tools",
+  "actions": [
+    {
+      "label": "Open on this PC",
+      "run": "python",
+      "args": ["-m", "http.server", "8793"],
+      "url": "http://localhost:8793",
+      "health": "http://localhost:8793",
+      "console": true
+    }
+  ],
+  "icon": "icon.png"
+}

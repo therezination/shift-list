@@ -1,0 +1,12 @@
+{
+  "name": "shift-list",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phone checklist for work shifts: morning and evening lists, things to mention, handover, history and codes.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "icons": "node tools/make-icons.mjs",
+    "serve": "python -m http.server 8793"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "shift-list", "runtimeExecutable": "python", "runtimeArgs": ["-m", "http.server", "8793", "--directory", "."], "port": 8793 }
+  ]
+}
