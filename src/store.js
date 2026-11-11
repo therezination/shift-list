@@ -52,9 +52,12 @@ export function stepsFromText(text, old = []) {
     });
 }
 
-export function progress(list, done, wd) {
-  const due = list.tasks.filter((t) => isDue(t, wd));
-  return { done: due.filter((t) => done[t.id]).length, total: due.length };
+// A task skipped for today is out of the count: it is neither done nor missed.
+export const isSkipped = (t, ticks) => !!(ticks.skipped && ticks.skipped[t.id]) && !ticks.done[t.id];
+
+export function progress(list, ticks, wd) {
+  const due = list.tasks.filter((t) => isDue(t, wd) && !isSkipped(t, ticks));
+  return { done: due.filter((t) => ticks.done[t.id]).length, total: due.length };
 }
 
 export function normaliseTask(t = {}) {
@@ -87,11 +90,14 @@ export function normalise(raw, now = new Date()) {
     seedVersion: SEED_VERSION,
     lists,
     // done: task or step id -> the time (ms) it was ticked
-    ticks: raw && raw.ticks && raw.ticks.date ? { date: raw.ticks.date, done: { ...raw.ticks.done } } : { date: dayKey(now), done: {} },
+    ticks: raw && raw.ticks && raw.ticks.date
+      ? { date: raw.ticks.date, done: { ...raw.ticks.done }, skipped: { ...raw.ticks.skipped } }
+      : { date: dayKey(now), done: {}, skipped: {} },
+    settings: { hideDone: !!(raw && raw.settings && raw.settings.hideDone) },
     // things to mention at handover, for the current working day
     mentions: (raw && Array.isArray(raw.mentions) ? raw.mentions : [])
       .filter((m) => m && String(m.text || '').trim())
-      .map((m) => ({ id: m.id || uid(), text: String(m.text).trim(), at: m.at || now.getTime() })),
+      .map((m) => ({ id: m.id || uid(), text: String(m.text).trim(), at: m.at || now.getTime(), photo: m.photo || '' })),
     history: raw && Array.isArray(raw.history) ? raw.history.slice(0, HISTORY_DAYS) : [],
   };
   rollover(state, now);
@@ -116,10 +122,16 @@ const weekdayOfKey = (key) => {
 };
 
 // One list as it stood on a day: what was ticked (and when) and what was left.
-export function summariseList(list, done, wd) {
+export function summariseList(list, ticks, wd) {
+  const { done } = ticks;
   const due = list.tasks.filter((t) => isDue(t, wd));
-  const out = { name: list.name, total: due.length, done: [], missed: [] };
+  const out = { name: list.name, total: 0, done: [], missed: [], skipped: [] };
   for (const t of due) {
+    if (isSkipped(t, ticks)) {
+      out.skipped.push({ title: t.title });
+      continue;
+    }
+    out.total += 1;
     if (done[t.id]) {
       out.done.push({ title: t.title, at: typeof done[t.id] === 'number' ? hhmm(done[t.id]) : '' });
     } else {
@@ -135,8 +147,8 @@ export function snapshot(state) {
   const wd = weekdayOfKey(state.ticks.date);
   return {
     date: state.ticks.date,
-    lists: state.lists.map((l) => summariseList(l, state.ticks.done, wd)).filter((l) => l.total > 0),
-    mentions: state.mentions.map((m) => ({ text: m.text, at: hhmm(m.at) })),
+    lists: state.lists.map((l) => summariseList(l, state.ticks, wd)).filter((l) => l.total + l.skipped.length > 0),
+    mentions: state.mentions.map((m) => ({ text: m.text, at: hhmm(m.at), photo: m.photo || '' })),
   };
 }
 
@@ -160,9 +172,14 @@ export function handoverText(summary, mentions, dateKey) {
   } else if (summary.total) {
     lines.push('Not done: nothing, all complete.');
   }
+  if (summary.skipped && summary.skipped.length) {
+    lines.push('');
+    lines.push('Skipped today (not needed):');
+    for (const t of summary.skipped) lines.push(`- ${t.title}`);
+  }
   lines.push('');
   lines.push('Things to mention:');
-  if (mentions.length) for (const m of mentions) lines.push(`- ${m.text}`);
+  if (mentions.length) for (const m of mentions) lines.push(`- ${m.text}${m.photo ? ' (photo attached)' : ''}`);
   else lines.push('- Nothing to pass on');
   return lines.join('\n');
 }
@@ -195,9 +212,17 @@ export function rollover(state, now = new Date()) {
   if (worthKeeping(snap)) {
     state.history = [snap, ...state.history.filter((h) => h.date !== snap.date)].slice(0, HISTORY_DAYS);
   }
-  state.ticks = { date: today, done: {} };
+  state.ticks = { date: today, done: {}, skipped: {} };
   state.mentions = [];
   return true;
+}
+
+// Every photo still referenced by today's notes or by history; anything else can be deleted.
+export function photoIds(state) {
+  return [
+    ...state.mentions.map((m) => m.photo),
+    ...state.history.flatMap((h) => (h.mentions || []).map((m) => m.photo)),
+  ].filter(Boolean);
 }
 
 export function move(arr, index, delta) {

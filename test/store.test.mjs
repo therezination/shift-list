@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   dayKey, weekday, isDue, isLate, stepsFromText, normalise, rollover, progress,
-  summariseList, handoverText, move,
+  summariseList, handoverText, move, photoIds,
 } from '../src/store.js';
 
 const at = (iso) => new Date(iso);
@@ -57,7 +57,7 @@ test('rollover files the day in history and clears ticks and mentions', () => {
 
   assert.equal(rollover(s, at('2026-11-11T22:00:00')), false);
   assert.equal(rollover(s, at('2026-11-12T06:00:00')), true);
-  assert.deepEqual(s.ticks, { date: '2026-11-12', done: {} });
+  assert.deepEqual(s.ticks, { date: '2026-11-12', done: {}, skipped: {} });
   assert.deepEqual(s.mentions, []);
   assert.equal(s.history.length, 1);
   const day = s.history[0];
@@ -111,14 +111,37 @@ test('handover text lists done, not done and things to mention', () => {
   const gap = list.tasks.find((t) => t.title === 'AM gap scan');
   delete done[gap.id];
   done[gap.steps[0].id] = 1;
-  const sum = summariseList(list, done, 3);
-  assert.deepEqual(progress(list, done, 3), { done: sum.total - 1, total: sum.total });
-  const text = handoverText(sum, [{ text: 'Short on milk' }], '2026-11-11');
+  const power = list.tasks.find((t) => t.title === 'MyWork AM power walk');
+  delete done[power.id];
+  const ticks = { done, skipped: { [power.id]: true } };
+  const sum = summariseList(list, ticks, 3);
+  assert.equal(sum.total, list.tasks.length - 2); // minus Frozen backup (not Wednesday) and the skipped one
+  assert.deepEqual(progress(list, ticks, 3), { done: sum.total - 1, total: sum.total });
+  const text = handoverText(sum, [{ text: 'Short on milk' }, { text: 'Damaged delivery', photo: 'p1' }], '2026-11-11');
+  assert.match(text, /Skipped today \(not needed\):\n- MyWork AM power walk/);
+  assert.match(text, /- Damaged delivery \(photo attached\)/);
+  assert.doesNotMatch(text, /Not done:[^]*power walk[^]*Skipped/);
   assert.match(text, /^Handover: Morning, Wed 11 Nov/);
   assert.match(text, /- OSA app \(07:30\)/);
   assert.match(text, /Not done:\n- AM gap scan \(1 of 5 steps done, due by 10:00\)/);
   assert.match(text, /Things to mention:\n- Short on milk/);
   assert.doesNotMatch(text, /Frozen backup/);
+});
+
+test('ticking a skipped task counts it again, and photos in use are tracked', () => {
+  const s = normalise(null, at('2026-11-11T08:00:00'));
+  const [a] = s.lists[0].tasks;
+  const before = progress(s.lists[0], s.ticks, 3).total;
+  s.ticks.skipped[a.id] = true;
+  assert.equal(progress(s.lists[0], s.ticks, 3).total, before - 1);
+  s.ticks.done[a.id] = 1;
+  assert.deepEqual(progress(s.lists[0], s.ticks, 3), { done: 1, total: before });
+
+  s.mentions.push({ id: 'm', text: 'Dent', at: 1, photo: 'p1' });
+  rollover(s, at('2026-11-12T08:00:00'));
+  assert.equal(s.history[0].mentions[0].photo, 'p1');
+  assert.deepEqual(photoIds(s), ['p1']);
+  assert.deepEqual(s.ticks.skipped, {});
 });
 
 test('move stays inside the array', () => {

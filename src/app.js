@@ -1,11 +1,12 @@
 // The screen: tabs, checklists, the editor sheets, Mention / Handover / History, and Codes.
-// All state rules live in store.js; the encrypted codes in vault.js.
+// All state rules live in store.js; the encrypted codes in vault.js; photos in photos.js.
 
 import {
-  load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, DAYS, uid,
-  stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate,
+  load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, isSkipped, DAYS, uid,
+  stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate, photoIds,
 } from './store.js';
 import * as vault from './vault.js';
+import * as photos from './photos.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -34,6 +35,7 @@ let state = load();
 save(state);
 let tab = localStorage.getItem('shiftlist.tab');
 let editing = false;
+let dragging = false;
 let lastList = null; // the list the handover is written for
 const expanded = new Set(); // task ids showing their steps
 const revealed = new Set(); // code ids showing their value
@@ -41,20 +43,37 @@ const revealed = new Set(); // code ids showing their value
 const currentList = () => state.lists.find((l) => l.id === tab) || null;
 const isSpecial = (id) => SPECIAL.some((s) => s[0] === id);
 
+const persist = () => save(state) || toast('Could not save: phone storage is full');
+
 function commit() {
-  if (!save(state)) toast('Could not save: phone storage is full');
+  persist();
   render();
 }
 
-/* ---------- toast + sheets ---------- */
+/* ---------- toast (with optional Undo) + sheets ---------- */
 
 let toastTimer = 0;
-function toast(text) {
+function toast(text, actionLabel, action) {
   const el = $('#toast');
-  el.textContent = text;
+  el.replaceChildren(h('span', {}, text));
+  if (action) {
+    el.append(h('button', { type: 'button', onclick: () => { el.classList.remove('show'); action(); } }, actionLabel));
+  }
+  el.classList.toggle('action', !!action);
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  toastTimer = setTimeout(() => el.classList.remove('show'), action ? 6000 : 2400);
+}
+
+// Runs a change, then offers to put everything back exactly as it was.
+function withUndo(label, change) {
+  const before = JSON.stringify(state);
+  change();
+  commit();
+  toast(label, 'Undo', () => {
+    state = normalise(JSON.parse(before));
+    commit();
+  });
 }
 
 const sheet = $('#sheet');
@@ -108,7 +127,7 @@ function askText(title, label, value = '', okLabel = 'Save') {
   });
 }
 
-// A delete button that needs a second tap.
+// A delete button that needs a second tap (for things Undo cannot bring back).
 function deleteButton(label, fn) {
   let armed = false;
   const b = btn(label, () => {
@@ -127,7 +146,7 @@ function renderTop() {
   const title = list ? list.name : SPECIAL.find((s) => s[0] === tab)[2];
   let sub = prettyDate(state.ticks.date);
   if (list) {
-    const p = progress(list, state.ticks.done, weekday());
+    const p = progress(list, state.ticks, weekday());
     if (p.total) sub += ` · ${p.done} of ${p.total} done`;
   }
   const canEdit = list || (tab === '#codes' && vault.status() === 'open');
@@ -142,7 +161,7 @@ function renderTabs() {
   const wd = weekday();
   const tabs = [
     ...state.lists.map((l) => {
-      const p = progress(l, state.ticks.done, wd);
+      const p = progress(l, state.ticks, wd);
       return [l.id, l.name, p.total ? `${p.done}/${p.total}` : ''];
     }),
     ...SPECIAL.map(([id, name]) => [id, name, id === '#mention' && state.mentions.length ? String(state.mentions.length) : '']),
@@ -160,81 +179,203 @@ function renderTabs() {
 
 /* ---------- checklists ---------- */
 
+const isFinished = (t) => !!state.ticks.done[t.id] || isSkipped(t, state.ticks);
+
+function isVisible(t) {
+  if (editing) return true;
+  if (!isDue(t, weekday())) return false;
+  return !(state.settings.hideDone && isFinished(t));
+}
+
+// After a tick only the card that changed is redrawn, plus the counters. No full re-render.
+function refreshTask(list, t) {
+  persist();
+  const view = $('#view');
+  const old = view.querySelector(`.task[data-id="${t.id}"]`);
+  if (!old) return render();
+  if (isVisible(t)) old.replaceWith(taskCard(list, t));
+  else old.remove();
+  const p = progress(list, state.ticks, weekday());
+  const bar = view.querySelector('.bar');
+  if (bar) {
+    bar.setAttribute('aria-valuenow', p.done);
+    bar.firstChild.style.width = `${p.total ? (p.done / p.total) * 100 : 0}%`;
+  }
+  const toggle = view.querySelector('.hidetoggle');
+  if (toggle) toggle.replaceWith(hideToggle(list));
+  renderTop();
+  renderTabs();
+}
+
 function toggleTask(list, t, on) {
-  if (on) state.ticks.done[t.id] = Date.now();
-  else delete state.ticks.done[t.id];
-  commit();
-  if (on) {
-    const p = progress(list, state.ticks.done, weekday());
-    if (p.done === p.total) toast(`${list.name}: all done`);
+  const done = state.ticks.done;
+  if (on) done[t.id] = Date.now();
+  else delete done[t.id];
+  refreshTask(list, t);
+  if (!on) return;
+  const p = progress(list, state.ticks, weekday());
+  if (state.settings.hideDone) {
+    toast(p.done === p.total ? `${list.name}: all done` : `Done: ${t.title}`, 'Undo', () => { delete done[t.id]; commit(); });
+  } else if (p.done === p.total) {
+    toast(`${list.name}: all done`);
   }
 }
 
-function toggleStep(t, s, on) {
+function toggleStep(list, t, s, on) {
   const done = state.ticks.done;
   if (on) done[s.id] = Date.now();
   else delete done[s.id];
-  if (on && !done[t.id] && t.steps.every((x) => done[x.id])) done[t.id] = Date.now();
-  commit();
+  const finishes = on && !done[t.id] && t.steps.every((x) => done[x.id]);
+  if (finishes) return toggleTask(list, t, true);
+  refreshTask(list, t);
 }
 
-function taskCard(list, t, index) {
+function skipTask(t) {
+  withUndo(`Skipped for today: ${t.title}`, () => {
+    state.ticks.skipped[t.id] = true;
+    expanded.delete(t.id);
+  });
+}
+
+// Finger-drag on the handle (edit mode). Cards swap as the dragged one passes their middle.
+function startDrag(e, list, card) {
+  if (e.button > 0) return;
+  e.preventDefault();
+  const handle = e.currentTarget;
+  handle.setPointerCapture(e.pointerId);
+  dragging = true;
+  card.classList.add('dragging');
+  const GAP = 10;
+  let startY = e.clientY;
+  let lastY = e.clientY;
+  let raf = 0;
+  const place = () => { card.style.transform = `translateY(${lastY - startY}px)`; };
+  const isCard = (el) => el && el.classList.contains('task');
+
+  const settle = () => {
+    for (let guard = 0; guard < 50; guard++) {
+      const r = card.getBoundingClientRect();
+      const mid = r.top + r.height / 2;
+      const next = card.nextElementSibling;
+      const prev = card.previousElementSibling;
+      if (isCard(next)) {
+        const nr = next.getBoundingClientRect();
+        if (mid > nr.top + nr.height / 2) { next.after(card); startY += nr.height + GAP; place(); continue; }
+      }
+      if (isCard(prev)) {
+        const pr = prev.getBoundingClientRect();
+        if (mid < pr.top + pr.height / 2) { prev.before(card); startY -= pr.height + GAP; place(); continue; }
+      }
+      break;
+    }
+  };
+
+  // Scroll the page when the finger is near the top or bottom.
+  const autoScroll = () => {
+    const top = $('#top').offsetHeight + 60;
+    const bottom = window.innerHeight - $('#tabs').offsetHeight - 60;
+    const dy = lastY < top ? -12 : lastY > bottom ? 12 : 0;
+    if (dy) {
+      const before = window.scrollY;
+      window.scrollBy(0, dy);
+      const moved = window.scrollY - before;
+      if (moved) { startY -= moved; place(); settle(); }
+    }
+    raf = requestAnimationFrame(autoScroll);
+  };
+
+  const onMove = (ev) => { lastY = ev.clientY; place(); settle(); };
+  const onEnd = () => {
+    cancelAnimationFrame(raf);
+    handle.removeEventListener('pointermove', onMove);
+    handle.removeEventListener('pointerup', onEnd);
+    handle.removeEventListener('pointercancel', onEnd);
+    dragging = false;
+    const order = [...$('#view').querySelectorAll('.task')].map((c) => c.dataset.id);
+    list.tasks.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    commit();
+  };
+  handle.addEventListener('pointermove', onMove);
+  handle.addEventListener('pointerup', onEnd);
+  handle.addEventListener('pointercancel', onEnd);
+  raf = requestAnimationFrame(autoScroll);
+}
+
+function taskCard(list, t) {
   const done = state.ticks.done;
+  const index = list.tasks.indexOf(t);
   const isDone = !!done[t.id];
+  const skipped = isSkipped(t, state.ticks);
   const due = isDue(t, weekday());
   const stepsDone = t.steps.filter((s) => done[s.id]).length;
-  const hasMore = t.steps.length > 0 || !!t.note;
   const isOpen = expanded.has(t.id) && !editing;
 
   const badges = [];
-  if (t.by) badges.push(h('span', { class: `badge${!isDone && due && isLate(t) ? ' late' : ''}` }, `by ${t.by}`));
+  if (skipped) badges.push(h('span', { class: 'badge' }, 'skipped today'));
+  if (t.by) badges.push(h('span', { class: `badge${!isDone && !skipped && due && isLate(t) ? ' late' : ''}` }, `by ${t.by}`));
   if (t.days.length) badges.push(h('span', { class: 'badge' }, t.days.map((d) => DAYS[d]).join(' ')));
   if (t.steps.length) badges.push(h('span', { class: 'badge' }, `${stepsDone}/${t.steps.length} steps`));
 
   const onBody = () => {
     if (editing) return editTask(list, t);
-    if (!hasMore) return toggleTask(list, t, !isDone);
     if (expanded.has(t.id)) expanded.delete(t.id);
     else expanded.add(t.id);
-    render();
+    card.replaceWith(taskCard(list, t));
   };
 
-  return h('article', { class: `task${isDone ? ' done' : ''}${due ? '' : ' off'}` },
+  const card = h('article', { class: `task${isDone ? ' done' : ''}${skipped ? ' skipped' : ''}${due ? '' : ' off'}`, 'data-id': t.id },
     h('div', { class: 'row' },
-      h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: isDone, 'aria-label': `Done: ${t.title}`, onchange: (e) => toggleTask(list, t, e.target.checked) }),
-        h('span', {})),
-      h('button', { type: 'button', class: 'body', 'aria-expanded': hasMore && !editing ? String(isOpen) : null, onclick: onBody },
+      editing
+        ? h('button', { type: 'button', class: 'handle', 'aria-label': `Drag to reorder ${t.title}`, onpointerdown: (e) => startDrag(e, list, card) }, '⠿')
+        : h('label', { class: 'check' },
+          h('input', { type: 'checkbox', checked: isDone, 'aria-label': `Done: ${t.title}`, onchange: (e) => toggleTask(list, t, e.target.checked) }),
+          h('span', {})),
+      h('button', { type: 'button', class: 'body', 'aria-expanded': editing ? null : String(isOpen), onclick: onBody },
         h('span', { class: 'title' }, t.title),
         badges.length > 0 && h('span', { class: 'meta' }, badges)),
       editing
         ? h('div', { class: 'tools' },
           h('button', { type: 'button', 'aria-label': `Move ${t.title} up`, disabled: index === 0, onclick: () => { move(list.tasks, index, -1); commit(); } }, '↑'),
           h('button', { type: 'button', 'aria-label': `Move ${t.title} down`, disabled: index === list.tasks.length - 1, onclick: () => { move(list.tasks, index, 1); commit(); } }, '↓'))
-        : hasMore && h('span', { class: 'chev', 'aria-hidden': 'true' }, isOpen ? '▾' : '▸')),
+        : h('span', { class: 'chev', 'aria-hidden': 'true' }, isOpen ? '▾' : '▸')),
     isOpen && h('div', { class: 'more' },
       t.note && h('p', { class: 'note' }, t.note),
       t.steps.length > 0 && h('ul', { class: 'steps' }, t.steps.map((s) =>
         h('li', {}, h('label', { class: `step${done[s.id] ? ' done' : ''}` },
-          h('input', { type: 'checkbox', checked: !!done[s.id], onchange: (e) => toggleStep(t, s, e.target.checked) }),
-          h('span', {}, s.text)))))),
+          h('input', { type: 'checkbox', checked: !!done[s.id], onchange: (e) => toggleStep(list, t, s, e.target.checked) }),
+          h('span', {}, s.text))))),
+      !isDone && h('div', { class: 'cardactions' },
+        skipped
+          ? btn('Bring back', () => { delete state.ticks.skipped[t.id]; commit(); }, 'small')
+          : btn('Skip for today', () => skipTask(t), 'small'))),
   );
+  return card;
+}
+
+function hideToggle(list) {
+  const wd = weekday();
+  const finished = list.tasks.filter((t) => isDue(t, wd) && isFinished(t)).length;
+  const hide = state.settings.hideDone;
+  return h('div', { class: 'hidetoggle' },
+    (hide || finished > 0) && h('button', {
+      type: 'button', class: 'link', 'aria-pressed': String(hide),
+      onclick: () => { state.settings.hideDone = !hide; commit(); },
+    }, hide ? `Show completed (${finished})` : 'Hide completed'));
 }
 
 function listView(list) {
   const wd = weekday();
-  const p = progress(list, state.ticks.done, wd);
+  const p = progress(list, state.ticks, wd);
   const off = list.tasks.filter((t) => !isDue(t, wd));
   const out = [];
   if (p.total) {
     out.push(h('div', { class: 'bar', role: 'progressbar', 'aria-label': `${list.name} progress`, 'aria-valuemin': 0, 'aria-valuemax': p.total, 'aria-valuenow': p.done },
       h('i', { style: `width:${(p.done / p.total) * 100}%` })));
   }
-  if (editing) out.push(h('p', { class: 'hint' }, 'Tap a task to change it. Use the arrows to reorder.'));
+  if (editing) out.push(h('p', { class: 'hint' }, 'Tap a task to change it. Drag the handle or use the arrows to reorder.'));
+  else out.push(hideToggle(list));
   if (!list.tasks.length) out.push(h('p', { class: 'empty' }, `Nothing in ${list.name} yet. Add your first task below.`));
-  list.tasks.forEach((t, i) => {
-    if (editing || isDue(t, wd)) out.push(taskCard(list, t, i));
-  });
+  for (const t of list.tasks) if (isVisible(t)) out.push(taskCard(list, t));
   if (!editing && off.length) {
     out.push(h('p', { class: 'hint' }, `Not today: ${off.map((t) => `${t.title} (${t.days.map((d) => DAYS[d]).join(' ')})`).join(', ')}`));
   }
@@ -286,15 +427,47 @@ function editTask(list, t) {
     h('div', { class: 'field' }, h('span', {}, 'Finish by (optional)'),
       h('div', { class: 'inline' }, by, btn('Clear', () => { by.value = ''; }, 'ghost'))),
     h('div', { class: 'actions' },
-      !isNew && deleteButton('Delete', () => {
-        list.tasks.splice(list.tasks.indexOf(t), 1);
+      !isNew && btn('Delete', () => {
         closeSheet();
-        commit();
-      }),
+        withUndo(`Deleted: ${t.title}`, () => list.tasks.splice(list.tasks.indexOf(t), 1));
+      }, 'danger ghost'),
       btn('Cancel', closeSheet),
       btn('Save', saveTask, 'primary')),
   );
   if (isNew) title.focus();
+}
+
+/* ---------- photos ---------- */
+
+function thumb(id, cls = 'thumb') {
+  const img = h('img', { class: cls, alt: 'Attached photo' });
+  photos.url(id).then((u) => { if (u) img.src = u; else img.replaceWith(h('span', { class: `${cls} missing` }, 'no photo')); });
+  return img;
+}
+
+function viewPhoto(id) {
+  openSheet('Photo', thumb(id, 'fullphoto'), h('div', { class: 'actions' }, btn('Close', closeSheet)));
+}
+
+// Opens the camera / gallery picker; resolves the stored photo id, or null.
+function pickPhoto() {
+  return new Promise((resolve) => {
+    const input = h('input', { type: 'file', accept: 'image/*' });
+    input.addEventListener('cancel', () => resolve(null));
+    input.addEventListener('change', async () => {
+      const source = input.files[0];
+      if (!source) return resolve(null);
+      try {
+        const id = uid();
+        await photos.put(id, await photos.shrink(source));
+        resolve(id);
+      } catch {
+        toast('Could not add that photo');
+        resolve(null);
+      }
+    });
+    input.click();
+  });
 }
 
 /* ---------- things to mention ---------- */
@@ -303,31 +476,51 @@ const clock = (ms) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit'
 
 function mentionView() {
   const input = h('input', { type: 'text', autocomplete: 'off', maxLength: 300, placeholder: 'Something the next shift should know', 'aria-label': 'New thing to mention' });
-  const add = () => {
-    const text = input.value.trim();
+  const add = (photo = '') => {
+    const text = input.value.trim() || (photo ? 'Photo' : '');
     if (!text) return input.focus();
-    state.mentions.push({ id: uid(), text, at: Date.now() });
+    state.mentions.push({ id: uid(), text, at: Date.now(), photo });
     commit();
-    $('#view input')?.focus();
+    if (!photo) $('#view input')?.focus();
   };
   input.addEventListener('keydown', (e) => e.key === 'Enter' && add());
   return [
-    h('div', { class: 'inline addrow' }, input, btn('Add', add, 'primary')),
-    !state.mentions.length && h('p', { class: 'empty' }, 'Nothing noted yet. Jot things down here during your shift and they go into the handover.'),
+    input,
+    h('div', { class: 'actions' },
+      btn('Add with photo', async () => { const id = await pickPhoto(); if (id) add(id); }),
+      btn('Add', () => add(), 'primary')),
+    !state.mentions.length && h('p', { class: 'empty' }, 'Nothing noted yet. Jot things down here during your shift, with a photo if it helps, and they go into the handover.'),
     ...state.mentions.map((m) =>
       h('button', { type: 'button', class: 'card line', onclick: () => editMention(m) },
+        m.photo && thumb(m.photo),
         h('span', { class: 'title' }, m.text), h('small', {}, clock(m.at)))),
   ];
 }
 
 function editMention(m) {
   const text = h('textarea', { rows: 3, value: m.text });
+  let photo = m.photo || '';
+  const slot = h('div', { class: 'photoslot' });
+  const drawSlot = () => slot.replaceChildren(...(photo
+    ? [thumb(photo, 'thumb big'), btn('Remove photo', () => { photo = ''; drawSlot(); }, 'ghost')]
+    : [btn('Add a photo', async () => { const id = await pickPhoto(); if (id) { photo = id; drawSlot(); } })]));
+  drawSlot();
   openSheet('Edit note',
     field('Note', text),
+    slot,
     h('div', { class: 'actions' },
-      deleteButton('Delete', () => { state.mentions.splice(state.mentions.indexOf(m), 1); closeSheet(); commit(); }),
+      btn('Delete', () => {
+        closeSheet();
+        withUndo('Note deleted', () => state.mentions.splice(state.mentions.indexOf(m), 1));
+      }, 'danger ghost'),
       btn('Cancel', closeSheet),
-      btn('Save', () => { if (!text.value.trim()) return text.focus(); m.text = text.value.trim(); closeSheet(); commit(); }, 'primary')));
+      btn('Save', () => {
+        if (!text.value.trim()) return text.focus();
+        m.text = text.value.trim();
+        m.photo = photo;
+        closeSheet();
+        commit();
+      }, 'primary')));
 }
 
 /* ---------- handover ---------- */
@@ -341,19 +534,36 @@ async function copyText(text, label = 'Copied') {
   }
 }
 
+// Shares the write-up, with the photos as attachments where the phone allows it.
+async function shareHandover(text) {
+  const ids = state.mentions.map((m) => m.photo).filter(Boolean);
+  const files = (await Promise.all(ids.map((id, i) => photos.file(id, `handover-photo-${i + 1}.jpg`)))).filter(Boolean);
+  const withFiles = files.length > 0 && navigator.canShare && navigator.canShare({ files });
+  try {
+    await navigator.share(withFiles ? { text, files } : { text });
+  } catch (err) {
+    if (err && err.name !== 'AbortError') toast('Could not open the share menu');
+  }
+}
+
 function handoverView() {
   if (!state.lists.length) return [h('p', { class: 'empty' }, 'Add a list first, then the handover is written from it.')];
   const list = state.lists.find((l) => l.id === lastList) || state.lists[0];
-  const text = handoverText(summariseList(list, state.ticks.done, weekday()), state.mentions, state.ticks.date);
+  const text = handoverText(summariseList(list, state.ticks, weekday()), state.mentions, state.ticks.date);
   const area = h('textarea', { class: 'handover', rows: 16, value: text, 'aria-label': 'Handover text' });
+  const pics = state.mentions.filter((m) => m.photo);
   return [
     h('div', { class: 'chips' }, state.lists.map((l) =>
       h('button', { type: 'button', class: `chip${l === list ? ' on' : ''}`, 'aria-pressed': String(l === list), onclick: () => { lastList = l.id; render(); } }, l.name))),
     area,
+    pics.length > 0 && h('div', { class: 'thumbs' }, pics.map((m) =>
+      h('button', { type: 'button', class: 'thumbbtn', 'aria-label': `Photo: ${m.text}`, onclick: () => viewPhoto(m.photo) }, thumb(m.photo, 'thumb big')))),
     h('div', { class: 'actions' },
-      navigator.share && btn('Share', () => navigator.share({ text: area.value }).catch(() => {})),
-      btn('Copy', () => copyText(area.value, 'Handover copied'), 'primary')),
-    h('p', { class: 'hint' }, 'Written from your ticks and your things to mention. You can change the wording here before you copy or share it.'),
+      navigator.share && btn(pics.length ? `Share with ${pics.length} photo${pics.length > 1 ? 's' : ''}` : 'Share', () => shareHandover(area.value)),
+      btn('Copy text', () => copyText(area.value, 'Handover copied'), 'primary')),
+    h('p', { class: 'hint' }, pics.length
+      ? 'Photos go with Share. Copy takes the text only. Add or remove photos on the Mention tab.'
+      : 'Written from your ticks and your things to mention. You can change the wording before you copy or share it. To attach a photo, add it on the Mention tab.'),
   ];
 }
 
@@ -367,10 +577,13 @@ function dayBlock(snap, label, open) {
       h('h3', {}, `${l.name}: ${l.done.length} of ${l.total}`),
       l.done.length > 0 && h('ul', { class: 'log' }, l.done.map((t) => h('li', { class: 'ok' }, t.title, t.at && h('small', {}, t.at)))),
       l.missed.length > 0 && h('ul', { class: 'log' }, l.missed.map((t) => h('li', { class: 'miss' }, t.title, h('small', {}, 'not done')))),
+      (l.skipped || []).length > 0 && h('ul', { class: 'log' }, l.skipped.map((t) => h('li', { class: 'miss' }, t.title, h('small', {}, 'skipped')))),
     ]),
     snap.mentions.length > 0 && [
       h('h3', {}, 'Things to mention'),
-      h('ul', { class: 'log' }, snap.mentions.map((m) => h('li', {}, m.text, m.at && h('small', {}, m.at)))),
+      h('ul', { class: 'log' }, snap.mentions.map((m) => h('li', {},
+        m.photo && h('button', { type: 'button', class: 'thumbbtn', 'aria-label': `Photo: ${m.text}`, onclick: () => viewPhoto(m.photo) }, thumb(m.photo)),
+        h('span', { class: 'grow' }, m.text), m.at && h('small', {}, m.at)))),
     ],
   );
 }
@@ -390,23 +603,24 @@ function codesView() {
   if (status === 'new') return codesSetup();
   if (status === 'locked') return codesUnlock();
   const items = vault.list();
-  const persist = () => vault.save().then(render, () => toast('Could not save the codes'));
+  const store = () => vault.save().then(render, () => toast('Could not save the codes'));
   return [
     editing && h('p', { class: 'hint' }, 'Tap a code to change it. Use the arrows to reorder.'),
     !items.length && h('p', { class: 'empty' }, 'No codes yet. Add door codes, logins and anything else you need to hand.'),
     ...items.map((c, i) => {
       const show = revealed.has(c.id);
+      const flip = () => { if (show) revealed.delete(c.id); else revealed.add(c.id); render(); };
       return h('article', { class: 'card code' },
-        h('button', { type: 'button', class: 'body', onclick: () => (editing ? editCode(c) : (show ? revealed.delete(c.id) : revealed.add(c.id), render())) },
+        h('button', { type: 'button', class: 'body', onclick: () => (editing ? editCode(c) : flip()) },
           h('span', { class: 'title' }, c.label),
           h('code', {}, show ? c.value : '•'.repeat(Math.min(Math.max(c.value.length, 4), 10))),
           c.note && h('small', {}, c.note)),
         editing
           ? h('div', { class: 'tools' },
-            h('button', { type: 'button', 'aria-label': `Move ${c.label} up`, disabled: i === 0, onclick: () => { move(items, i, -1); persist(); } }, '↑'),
-            h('button', { type: 'button', 'aria-label': `Move ${c.label} down`, disabled: i === items.length - 1, onclick: () => { move(items, i, 1); persist(); } }, '↓'))
+            h('button', { type: 'button', 'aria-label': `Move ${c.label} up`, disabled: i === 0, onclick: () => { move(items, i, -1); store(); } }, '↑'),
+            h('button', { type: 'button', 'aria-label': `Move ${c.label} down`, disabled: i === items.length - 1, onclick: () => { move(items, i, 1); store(); } }, '↓'))
           : h('div', { class: 'tools' },
-            h('button', { type: 'button', class: 'word', onclick: () => { show ? revealed.delete(c.id) : revealed.add(c.id); render(); } }, show ? 'Hide' : 'Show'),
+            h('button', { type: 'button', class: 'word', onclick: flip }, show ? 'Hide' : 'Show'),
             h('button', { type: 'button', class: 'word', onclick: () => copyText(c.value, `${c.label} copied`) }, 'Copy')));
     }),
     btn('+ Add a code', () => editCode(null), 'add'),
@@ -516,14 +730,14 @@ function openMenu() {
 
   if (list) {
     const i = state.lists.indexOf(list);
-    add(`Untick everything in ${list.name}`, async () => {
-      if (!(await confirmSheet(`Untick everything in ${list.name}?`, 'Clears today\'s ticks for this list.', 'Untick all'))) return;
+    add(state.settings.hideDone ? 'Show completed tasks' : 'Hide completed tasks', () => { state.settings.hideDone = !state.settings.hideDone; commit(); });
+    add(`Untick everything in ${list.name}`, () => withUndo(`${list.name} unticked`, () => {
       for (const t of list.tasks) {
         delete state.ticks.done[t.id];
+        delete state.ticks.skipped[t.id];
         for (const s of t.steps) delete state.ticks.done[s.id];
       }
-      commit();
-    });
+    }));
     add('Rename this list', async () => {
       const name = await askText('Rename list', 'Name', list.name);
       if (name) { list.name = name; commit(); }
@@ -532,8 +746,7 @@ function openMenu() {
     if (i < state.lists.length - 1) add('Move this list later', () => { move(state.lists, i, 1); commit(); });
     add('Delete this list', async () => {
       if (!(await confirmSheet(`Delete ${list.name}?`, `Removes the list and its ${list.tasks.length} tasks. History is kept.`, 'Delete list'))) return;
-      state.lists.splice(i, 1);
-      commit();
+      withUndo(`${list.name} deleted`, () => state.lists.splice(i, 1));
     }, 'danger');
   }
   add('Add a new list', async () => {
@@ -555,7 +768,7 @@ function openMenu() {
   }
   if (tab === '#history' && state.history.length) {
     add('Clear history', async () => {
-      if (await confirmSheet('Clear history?', `Deletes the record of ${state.history.length} past days.`, 'Clear')) { state.history = []; commit(); }
+      if (await confirmSheet('Clear history?', `Deletes the record of ${state.history.length} past days.`, 'Clear')) withUndo('History cleared', () => { state.history = []; });
     }, 'danger');
   }
   add('Back up to a file', backup);
@@ -568,7 +781,7 @@ function backup() {
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
   h('a', { href: url, download: `shift-list-backup-${state.ticks.date}.json` }).click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  toast('Backup saved to your downloads');
+  toast(photoIds(state).length ? 'Backup saved (photos are not included)' : 'Backup saved to your downloads');
 }
 
 function restore() {
@@ -609,6 +822,8 @@ function render() {
   $('#view').replaceChildren(...view.flat(Infinity).filter((n) => n != null && n !== false));
 }
 
+const busy = () => sheet.open || dragging;
+
 // Leaving the app locks the codes; coming back checks whether the day has turned over.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
@@ -619,18 +834,36 @@ document.addEventListener('visibilitychange', () => {
     }
   } else if (rollover(state)) {
     commit();
-  } else if (currentList() && !sheet.open) {
+  } else if (currentList() && !busy()) {
     render();
   }
 });
 
 // Keeps the "by 10:00" badges honest while the checklist is on screen.
 setInterval(() => {
-  if (currentList() && !sheet.open && !document.hidden) render();
+  if (currentList() && !busy() && !document.hidden) render();
 }, 60000);
 
 render();
 
+// Photos nothing refers to any more (deleted notes, expired history) are cleared at start-up,
+// never straight away, so Undo can still bring a note back with its photo.
+photos.sweep(photoIds(state)).catch(() => {});
+
+/* ---------- offline + "update ready" ---------- */
+
+$('#update').addEventListener('click', () => location.reload());
+
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  // If a worker was already in charge when the page opened, a change of worker means a new
+  // version has just been downloaded: offer it instead of waiting for the next launch.
+  const hadWorker = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadWorker) $('#update').hidden = false;
+  });
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) reg.update().catch(() => {});
+    });
+  }).catch(() => {});
 }

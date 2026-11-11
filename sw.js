@@ -2,7 +2,7 @@
 // and fetches a fresh copy in the background, so an update shows up the next time it is opened.
 // Bump VERSION whenever the list of files changes.
 
-const VERSION = 'shiftlist-2';
+const VERSION = 'shiftlist-3';
 const SHELL = [
   './',
   'index.html',
@@ -12,6 +12,7 @@ const SHELL = [
   'src/store.js',
   'src/seed.js',
   'src/vault.js',
+  'src/photos.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/icon-maskable-512.png',
