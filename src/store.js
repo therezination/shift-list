@@ -73,6 +73,25 @@ export function normaliseTask(t = {}) {
   };
 }
 
+export function normaliseDelivery(d = {}) {
+  return {
+    id: d.id || uid(),
+    name: String(d.name || '').trim() || 'Delivery',
+    time: /^\d{1,2}:\d{2}$/.test(d.time || '') ? d.time.padStart(5, '0') : '',
+    days: Array.isArray(d.days) ? [...new Set(d.days.filter((x) => x >= 0 && x <= 6))].sort() : [],
+    note: String(d.note || ''),
+  };
+}
+
+// Deliveries due on a weekday, earliest first; ones with no time set go last.
+export function dueDeliveries(deliveries, wd) {
+  return deliveries
+    .filter((d) => isDue(d, wd))
+    .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99') || a.name.localeCompare(b.name));
+}
+
+export const isOverdue = (d, ticks, now = new Date()) => !!d.time && !ticks.done[d.id] && isLate({ by: d.time }, now);
+
 export function normalise(raw, now = new Date()) {
   const lists = (raw && Array.isArray(raw.lists) ? raw.lists : seedLists()).map((l) => ({
     id: l.id || uid(),
@@ -89,6 +108,8 @@ export function normalise(raw, now = new Date()) {
     schema: SCHEMA,
     seedVersion: SEED_VERSION,
     lists,
+    // the delivery schedule: what is due on which days and at what time
+    deliveries: (raw && Array.isArray(raw.deliveries) ? raw.deliveries : []).map(normaliseDelivery),
     // done: task or step id -> the time (ms) it was ticked
     ticks: raw && raw.ticks && raw.ticks.date
       ? { date: raw.ticks.date, done: { ...raw.ticks.done }, skipped: { ...raw.ticks.skipped } }
@@ -142,6 +163,15 @@ export function summariseList(list, ticks, wd) {
   return out;
 }
 
+// Today's deliveries with the time each one was marked as arrived ('' if it was not).
+export function summariseDeliveries(deliveries, ticks, wd) {
+  return dueDeliveries(deliveries, wd).map((d) => ({
+    name: d.name,
+    time: d.time,
+    at: ticks.done[d.id] ? (typeof ticks.done[d.id] === 'number' ? hhmm(ticks.done[d.id]) : 'yes') : '',
+  }));
+}
+
 // The record of a whole working day, kept in history.
 export function snapshot(state) {
   const wd = weekdayOfKey(state.ticks.date);
@@ -149,13 +179,16 @@ export function snapshot(state) {
     date: state.ticks.date,
     lists: state.lists.map((l) => summariseList(l, state.ticks, wd)).filter((l) => l.total + l.skipped.length > 0),
     mentions: state.mentions.map((m) => ({ text: m.text, at: hhmm(m.at), photo: m.photo || '' })),
+    deliveries: summariseDeliveries(state.deliveries, state.ticks, wd),
   };
 }
 
-const worthKeeping = (snap) => snap.mentions.length > 0 || snap.lists.some((l) => l.done.length > 0);
+const worthKeeping = (snap) => snap.mentions.length > 0
+  || snap.lists.some((l) => l.done.length > 0)
+  || snap.deliveries.some((d) => d.at);
 
 // The handover write-up for one list, as plain text ready to paste or send.
-export function handoverText(summary, mentions, dateKey) {
+export function handoverText(summary, mentions, dateKey, deliveries = []) {
   const lines = [`Handover: ${summary.name}, ${prettyDate(dateKey)}`, ''];
   lines.push(`Done (${summary.done.length} of ${summary.total}):`);
   if (summary.done.length) for (const t of summary.done) lines.push(`- ${t.title}${t.at ? ` (${t.at})` : ''}`);
@@ -176,6 +209,14 @@ export function handoverText(summary, mentions, dateKey) {
     lines.push('');
     lines.push('Skipped today (not needed):');
     for (const t of summary.skipped) lines.push(`- ${t.title}`);
+  }
+  if (deliveries.length) {
+    lines.push('');
+    lines.push('Deliveries:');
+    for (const d of deliveries) {
+      const due = d.time ? `, due ${d.time}` : '';
+      lines.push(`- ${d.name}${due}: ${d.at ? (d.at === 'yes' ? 'arrived' : `arrived ${d.at}`) : 'not arrived'}`);
+    }
   }
   lines.push('');
   lines.push('Things to mention:');

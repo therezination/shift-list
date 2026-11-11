@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   dayKey, weekday, isDue, isLate, stepsFromText, normalise, rollover, progress,
-  summariseList, handoverText, move, photoIds,
+  summariseList, handoverText, move, photoIds, dueDeliveries, isOverdue, summariseDeliveries, snapshot,
 } from '../src/store.js';
 
 const at = (iso) => new Date(iso);
@@ -149,4 +149,36 @@ test('move stays inside the array', () => {
   assert.equal(move(a, 0, -1), false);
   assert.equal(move(a, 0, 1), true);
   assert.deepEqual(a, [2, 1, 3]);
+});
+
+test('deliveries: due by weekday, earliest first, overdue until marked arrived', () => {
+  const s = normalise({
+    lists: [],
+    deliveries: [
+      { id: 'b', name: 'Bread', time: '7:15' },
+      { id: 'g', name: 'Greencore', time: '06:30', days: [1, 3, 5] },
+      { id: 'n', name: 'Newspapers' },
+      { id: 'f', name: 'Frozen', time: '05:00', days: [2] },
+    ],
+  }, at('2026-11-11T08:00:00'));
+  assert.equal(s.deliveries[0].time, '07:15');
+  const today = dueDeliveries(s.deliveries, 3); // Wednesday
+  assert.deepEqual(today.map((d) => d.name), ['Greencore', 'Bread', 'Newspapers']);
+
+  const now = at('2026-11-11T07:00:00');
+  assert.ok(isOverdue(today[0], s.ticks, now));
+  assert.ok(!isOverdue(today[1], s.ticks, now)); // 07:15 not reached
+  assert.ok(!isOverdue(today[2], s.ticks, now)); // no time set
+  s.ticks.done.g = at('2026-11-11T06:42:00').getTime();
+  assert.ok(!isOverdue(today[0], s.ticks, now));
+
+  const sum = summariseDeliveries(s.deliveries, s.ticks, 3);
+  assert.deepEqual(sum[0], { name: 'Greencore', time: '06:30', at: '06:42' });
+  const text = handoverText({ name: 'Morning', total: 0, done: [], missed: [], skipped: [] }, [], '2026-11-11', sum);
+  assert.match(text, /Deliveries:\n- Greencore, due 06:30: arrived 06:42\n- Bread, due 07:15: not arrived\n- Newspapers: not arrived/);
+
+  assert.equal(snapshot(s).deliveries.length, 3);
+  rollover(s, at('2026-11-12T08:00:00'));
+  assert.equal(s.history[0].deliveries[0].at, '06:42'); // an arrival alone is worth filing
+  assert.deepEqual(s.ticks.done, {});
 });

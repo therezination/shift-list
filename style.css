@@ -231,13 +231,13 @@ code { font: 600 16px/1.3 ui-monospace, "Cascadia Mono", Consolas, monospace; ov
 #tabs::-webkit-scrollbar { display: none; }
 .tab {
   flex: 1 0 auto;
-  min-width: 48px; min-height: 52px;
+  min-width: 40px; min-height: 52px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-  padding: 4px 5px;
+  padding: 4px 3px;
   border: 0; border-radius: 12px; background: none;
   color: var(--muted);
 }
-.tab b { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.tab b { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
 .tab small { font-size: 11px; min-height: 14px; white-space: pre; }
 .tab.on { background: var(--raise); color: var(--text); }
 .tab.on small { color: var(--text); font-weight: 700; }
@@ -339,3 +339,11 @@ dialog#sheet::backdrop { background: rgba(0, 0, 0, 0.55); }
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 #update[hidden] { display: none; }
+
+/* ---------- deliveries ---------- */
+
+.when { display: grid; place-items: center; padding: 0 14px 0 6px; font: 700 18px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.task.done .when { color: var(--muted); }
+.delivery .note { margin: 0; }
+.badge.next { background: var(--accent); color: var(--on-accent); }
+span.check { cursor: default; }

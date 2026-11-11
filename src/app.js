@@ -4,6 +4,7 @@
 import {
   load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, isSkipped, DAYS, uid,
   stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate, photoIds,
+  normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries,
 } from './store.js';
 import * as vault from './vault.js';
 import * as photos from './photos.js';
@@ -25,6 +26,7 @@ function h(tag, attrs, ...kids) {
 }
 
 const SPECIAL = [
+  ['#deliveries', 'Deliveries', 'Deliveries'],
   ['#mention', 'Mention', 'Things to mention'],
   ['#handover', 'Handover', 'Handover'],
   ['#history', 'History', 'History'],
@@ -157,6 +159,15 @@ function renderTop() {
   ].filter(Boolean));
 }
 
+function tabCount(id) {
+  if (id === '#mention') return state.mentions.length ? String(state.mentions.length) : '';
+  if (id === '#deliveries') {
+    const due = dueDeliveries(state.deliveries, weekday());
+    return due.length ? `${due.filter((d) => state.ticks.done[d.id]).length}/${due.length}` : '';
+  }
+  return '';
+}
+
 function renderTabs() {
   const wd = weekday();
   const tabs = [
@@ -164,7 +175,7 @@ function renderTabs() {
       const p = progress(l, state.ticks, wd);
       return [l.id, l.name, p.total ? `${p.done}/${p.total}` : ''];
     }),
-    ...SPECIAL.map(([id, name]) => [id, name, id === '#mention' && state.mentions.length ? String(state.mentions.length) : '']),
+    ...SPECIAL.map(([id, name]) => [id, name, tabCount(id)]),
   ];
   $('#tabs').replaceChildren(
     ...tabs.map(([id, name, count]) =>
@@ -383,6 +394,21 @@ function listView(list) {
   return out;
 }
 
+// Weekday chips that add to / remove from the given Set. None picked means every day.
+function dayPicker(days) {
+  return h('div', { class: 'field' }, h('span', {}, 'Only on these days (none picked = every day)'),
+    h('div', { class: 'chips' }, DAYS.map((name, d) => {
+      const chip = h('button', { type: 'button', class: `chip${days.has(d) ? ' on' : ''}`, 'aria-pressed': String(days.has(d)) }, name);
+      chip.addEventListener('click', () => {
+        if (days.has(d)) days.delete(d);
+        else days.add(d);
+        chip.classList.toggle('on', days.has(d));
+        chip.setAttribute('aria-pressed', String(days.has(d)));
+      });
+      return chip;
+    })));
+}
+
 function editTask(list, t) {
   const isNew = !t;
   const days = new Set(t ? t.days : []);
@@ -390,17 +416,6 @@ function editTask(list, t) {
   const steps = h('textarea', { rows: 5, value: t ? t.steps.map((s) => s.text).join('\n') : '', placeholder: 'One step per line (optional)' });
   const note = h('textarea', { rows: 2, value: t ? t.note : '', placeholder: 'Anything to remember (optional)' });
   const by = h('input', { type: 'time', value: t ? t.by : '' });
-
-  const dayChips = DAYS.map((name, d) => {
-    const chip = h('button', { type: 'button', class: `chip${days.has(d) ? ' on' : ''}`, 'aria-pressed': String(days.has(d)) }, name);
-    chip.addEventListener('click', () => {
-      if (days.has(d)) days.delete(d);
-      else days.add(d);
-      chip.classList.toggle('on', days.has(d));
-      chip.setAttribute('aria-pressed', String(days.has(d)));
-    });
-    return chip;
-  });
 
   const saveTask = () => {
     if (!title.value.trim()) return title.focus();
@@ -423,7 +438,7 @@ function editTask(list, t) {
     field('Task', title),
     field('Steps', steps),
     field('Note', note),
-    h('div', { class: 'field' }, h('span', {}, 'Only on these days (none picked = every day)'), h('div', { class: 'chips' }, dayChips)),
+    dayPicker(days),
     h('div', { class: 'field' }, h('span', {}, 'Finish by (optional)'),
       h('div', { class: 'inline' }, by, btn('Clear', () => { by.value = ''; }, 'ghost'))),
     h('div', { class: 'actions' },
@@ -435,6 +450,86 @@ function editTask(list, t) {
       btn('Save', saveTask, 'primary')),
   );
   if (isNew) title.focus();
+}
+
+/* ---------- deliveries ---------- */
+
+function deliveriesView() {
+  const wd = weekday();
+  const done = state.ticks.done;
+  const today = dueDeliveries(state.deliveries, wd);
+  const other = state.deliveries.filter((d) => !isDue(d, wd));
+  const next = today.find((d) => !done[d.id] && d.time && !isOverdue(d, state.ticks));
+  const dayNames = (d) => d.days.map((x) => DAYS[x]).join(' ');
+
+  const card = (d, due) => {
+    const arrived = done[d.id];
+    const badges = [];
+    if (due && arrived) badges.push(h('span', { class: 'badge' }, `arrived ${clock(arrived)}`));
+    else if (due && isOverdue(d, state.ticks)) badges.push(h('span', { class: 'badge late' }, 'not arrived yet'));
+    else if (due && d === next) badges.push(h('span', { class: 'badge next' }, 'next'));
+    if (d.days.length) badges.push(h('span', { class: 'badge' }, dayNames(d)));
+    return h('article', { class: `task delivery${arrived && due ? ' done' : ''}${due ? '' : ' off'}` },
+      h('div', { class: 'row' },
+        due
+          ? h('label', { class: 'check' },
+            h('input', {
+              type: 'checkbox', checked: !!arrived, 'aria-label': `Arrived: ${d.name}`,
+              onchange: (e) => {
+                if (e.target.checked) done[d.id] = Date.now();
+                else delete done[d.id];
+                commit();
+              },
+            }),
+            h('span', {}))
+          : h('span', { class: 'check' }),
+        h('button', { type: 'button', class: 'body', onclick: () => editDelivery(d) },
+          h('span', { class: 'title' }, d.name),
+          badges.length > 0 && h('span', { class: 'meta' }, badges),
+          d.note && h('span', { class: 'note' }, d.note)),
+        h('span', { class: 'when' }, d.time || '--:--')));
+  };
+
+  return [
+    !state.deliveries.length && h('p', { class: 'empty' }, 'No deliveries yet. Add each one with the time it is due and the days it comes. Tick it when it arrives and the time is noted for the handover.'),
+    state.deliveries.length > 0 && !today.length && h('p', { class: 'empty' }, 'No deliveries due today.'),
+    ...today.map((d) => card(d, true)),
+    btn('+ Add a delivery', () => editDelivery(null), 'add'),
+    other.length > 0 && h('p', { class: 'hint' }, 'Other days'),
+    ...other.sort((a, b) => (a.time || '99').localeCompare(b.time || '99')).map((d) => card(d, false)),
+    state.deliveries.length > 0 && h('p', { class: 'hint' }, 'Tap a delivery to change its time or days. Tick the box when it arrives.'),
+  ];
+}
+
+function editDelivery(d) {
+  const isNew = !d;
+  const days = new Set(d ? d.days : []);
+  const name = h('input', { type: 'text', value: d ? d.name : '', autocomplete: 'off', maxLength: 60, placeholder: 'Who or what is being delivered' });
+  const time = h('input', { type: 'time', value: d ? d.time : '' });
+  const note = h('input', { type: 'text', value: d ? d.note : '', autocomplete: 'off', maxLength: 200, placeholder: 'Door, cages, temp check… (optional)' });
+  openSheet(
+    isNew ? 'New delivery' : 'Edit delivery',
+    field('Delivery', name),
+    h('div', { class: 'field' }, h('span', {}, 'Due at'),
+      h('div', { class: 'inline' }, time, btn('Clear', () => { time.value = ''; }, 'ghost'))),
+    dayPicker(days),
+    field('Note', note),
+    h('div', { class: 'actions' },
+      !isNew && btn('Delete', () => {
+        closeSheet();
+        withUndo(`Deleted: ${d.name}`, () => state.deliveries.splice(state.deliveries.indexOf(d), 1));
+      }, 'danger ghost'),
+      btn('Cancel', closeSheet),
+      btn('Save', () => {
+        if (!name.value.trim()) return name.focus();
+        const next = normaliseDelivery({ id: d ? d.id : uid(), name: name.value, time: time.value, days: [...days], note: note.value.trim() });
+        if (isNew) state.deliveries.push(next);
+        else Object.assign(d, next);
+        closeSheet();
+        commit();
+      }, 'primary')),
+  );
+  if (isNew) name.focus();
 }
 
 /* ---------- photos ---------- */
@@ -549,7 +644,8 @@ async function shareHandover(text) {
 function handoverView() {
   if (!state.lists.length) return [h('p', { class: 'empty' }, 'Add a list first, then the handover is written from it.')];
   const list = state.lists.find((l) => l.id === lastList) || state.lists[0];
-  const text = handoverText(summariseList(list, state.ticks, weekday()), state.mentions, state.ticks.date);
+  const text = handoverText(summariseList(list, state.ticks, weekday()), state.mentions, state.ticks.date,
+    summariseDeliveries(state.deliveries, state.ticks, weekday()));
   const area = h('textarea', { class: 'handover', rows: 16, value: text, 'aria-label': 'Handover text' });
   const pics = state.mentions.filter((m) => m.photo);
   return [
@@ -579,6 +675,11 @@ function dayBlock(snap, label, open) {
       l.missed.length > 0 && h('ul', { class: 'log' }, l.missed.map((t) => h('li', { class: 'miss' }, t.title, h('small', {}, 'not done')))),
       (l.skipped || []).length > 0 && h('ul', { class: 'log' }, l.skipped.map((t) => h('li', { class: 'miss' }, t.title, h('small', {}, 'skipped')))),
     ]),
+    (snap.deliveries || []).length > 0 && [
+      h('h3', {}, 'Deliveries'),
+      h('ul', { class: 'log' }, snap.deliveries.map((d) => h('li', { class: d.at ? 'ok' : 'miss' },
+        `${d.name}${d.time ? `, due ${d.time}` : ''}`, h('small', {}, d.at ? (d.at === 'yes' ? 'arrived' : `arrived ${d.at}`) : 'not arrived')))),
+    ],
     snap.mentions.length > 0 && [
       h('h3', {}, 'Things to mention'),
       h('ul', { class: 'log' }, snap.mentions.map((m) => h('li', {},
@@ -815,6 +916,7 @@ function render() {
   renderTabs();
   const list = currentList();
   const view = list ? listView(list)
+    : tab === '#deliveries' ? deliveriesView()
     : tab === '#mention' ? mentionView()
       : tab === '#handover' ? handoverView()
         : tab === '#history' ? historyView()
@@ -841,7 +943,7 @@ document.addEventListener('visibilitychange', () => {
 
 // Keeps the "by 10:00" badges honest while the checklist is on screen.
 setInterval(() => {
-  if (currentList() && !busy() && !document.hidden) render();
+  if ((currentList() || tab === '#deliveries') && !busy() && !document.hidden) render();
 }, 60000);
 
 render();

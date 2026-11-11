@@ -11,6 +11,9 @@ code, no accounts. It installs to an Android home screen as a web app and works 
   an **Undo** for a few seconds.
 - **Edit** on any list: tap a task to change its title, steps (one per line), note, days and time;
   drag the handle or use the arrows to reorder. The ⋮ menu adds, renames, moves and deletes lists.
+- **Deliveries**: each delivery with the time it is due and the days it comes, earliest first.
+  Tick one when it arrives and the time is noted; an unticked one turns amber once its time has
+  passed. Arrivals go into the handover and history.
 - **Mention**: jot down things the next shift should know, with a photo if it helps. Photos are
   shrunk and kept on the phone (`IndexedDB`); Share on the Handover tab sends them with the text.
 - **Handover**: writes the summary (done with times, not done, things to mention) for a list.
