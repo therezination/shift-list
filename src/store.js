@@ -1,10 +1,11 @@
 // State shape, persistence and the pure rules (what is due, what is late, day rollover).
 // Nothing here touches the DOM, so `npm test` can run it in plain Node.
 
-import { seedLists } from './seed.js';
+import { seedLists, eveningTasks } from './seed.js';
 
 export const KEY = 'shiftlist.v1';
 export const SCHEMA = 1;
+export const SEED_VERSION = 2;
 export const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // The working day rolls over at 04:00, so a late shift keeps its ticks past midnight.
@@ -75,8 +76,15 @@ export function normalise(raw, now = new Date()) {
     name: String(l.name || 'List'),
     tasks: (l.tasks || []).map(normaliseTask),
   }));
+  // Starting content added after the first release reaches existing installs once, and only
+  // where it cannot overwrite anything: seed 2 fills the Evening list if it is still empty.
+  if (raw && Array.isArray(raw.lists) && (raw.seedVersion || 1) < 2) {
+    const evening = lists.find((l) => l.id === 'evening');
+    if (evening && evening.tasks.length === 0) evening.tasks = eveningTasks().map(normaliseTask);
+  }
   const state = {
     schema: SCHEMA,
+    seedVersion: SEED_VERSION,
     lists,
     // done: task or step id -> the time (ms) it was ticked
     ticks: raw && raw.ticks && raw.ticks.date ? { date: raw.ticks.date, done: { ...raw.ticks.done } } : { date: dayKey(now), done: {} },

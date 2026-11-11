@@ -2,7 +2,7 @@
 // and fetches a fresh copy in the background, so an update shows up the next time it is opened.
 // Bump VERSION whenever the list of files changes.
 
-const VERSION = 'shiftlist-1';
+const VERSION = 'shiftlist-2';
 const SHELL = [
   './',
   'index.html',

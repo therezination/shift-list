@@ -62,11 +62,31 @@ test('rollover files the day in history and clears ticks and mentions', () => {
   assert.equal(s.history.length, 1);
   const day = s.history[0];
   assert.equal(day.date, '2026-11-11');
-  assert.equal(day.lists.length, 1); // the empty Evening list is left out
+  assert.deepEqual(day.lists.map((l) => l.name), ['Morning', 'Evening']);
+  assert.equal(day.lists[1].done.length, 0);
   assert.deepEqual(day.lists[0].done, [{ title: a.title, at: '08:05' }]);
   assert.equal(day.mentions[0].text, 'Freezer 2 alarm');
   // Wednesday: Frozen backup (Mon Thu Sat) was not due, so it is not "missed"
   assert.ok(!day.lists[0].missed.some((t) => t.title === 'Frozen backup'));
+});
+
+test('an install from before the evening list existed gets it once, if Evening is still empty', () => {
+  const now = at('2026-11-11T18:00:00');
+  const old = JSON.parse(JSON.stringify(normalise(null, now)));
+  delete old.seedVersion;
+  old.lists[1].tasks = [];
+  const filled = normalise(old, now);
+  assert.equal(filled.lists[1].tasks.length, 16);
+  assert.equal(filled.seedVersion, 2);
+
+  // Evening already has the user's own tasks: left alone
+  old.lists[1].tasks = [{ title: 'Mine' }];
+  assert.deepEqual(normalise(old, now).lists[1].tasks.map((t) => t.title), ['Mine']);
+
+  // Emptied on purpose after the update: stays empty
+  const emptied = JSON.parse(JSON.stringify(filled));
+  emptied.lists[1].tasks = [];
+  assert.equal(normalise(emptied, now).lists[1].tasks.length, 0);
 });
 
 test('an untouched day off is not filed', () => {
