@@ -347,3 +347,48 @@ dialog#sheet::backdrop { background: rgba(0, 0, 0, 0.55); }
 .delivery .note { margin: 0; }
 .badge.next { background: var(--accent); color: var(--on-accent); }
 span.check { cursor: default; }
+
+/* ---------- boxes to fill in (task inputs, delivery arrivals) ---------- */
+
+.inputs { display: flex; flex-wrap: wrap; gap: 10px; padding: 0 14px 12px 56px; }
+.delivery .inputs { padding-left: 14px; }
+.input { flex: 1 1 110px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.input.text, .input.wide, .input.jump, .input.counter { flex-basis: 100%; }
+.input .lbl { font-size: 12px; font-weight: 600; color: var(--muted); }
+.input input[type="number"] {
+  width: 100%; min-height: 46px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--raise);
+  font-size: 18px; font-weight: 700;
+}
+.input.wide, .input.jump, .input.counter { flex-direction: row; align-items: center; gap: 10px; }
+.input.wide > .lbl { flex: none; }
+.input.wide > input { flex: 1; }
+.input.jump .lbl, .input.counter .lbl { flex: 1; font-size: 14px; }
+.btn.outline { border: 1px solid var(--line); color: var(--text); }
+.tickrow { display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 14px; }
+.tickrow input { width: 22px; height: 22px; flex: none; margin: 0; accent-color: var(--accent); }
+.input.counter .count { min-width: 44px; text-align: center; font: 700 26px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.input.counter button {
+  min-width: 52px; height: 52px;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--raise);
+  font-size: 18px; font-weight: 700;
+}
+.input.counter .plus { min-width: 84px; background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+.btn.temps.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.temps { border: 1px solid var(--line); color: var(--text); min-width: 130px; }
+.input.wide .btn.ghost { margin-left: auto; }
+.delivery .body { padding-left: 14px; }
+.delivery .when { grid-auto-flow: row; gap: 2px; text-align: right; }
+.delivery .when small { font: 600 11px/1 system-ui, sans-serif; }
+.badge.in { background: var(--accent); color: var(--on-accent); }
+.tools .arrive { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+select {
+  min-height: 46px; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--raise);
+  font: inherit; color: inherit;
+}
+.inputrows { display: flex; flex-direction: column; gap: 8px; }
+.inputrow select { flex: none; max-width: 42%; }
+.inputrow .btn { min-width: 46px; padding: 0; }

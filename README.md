@@ -11,9 +11,15 @@ code, no accounts. It installs to an Android home screen as a web app and works 
   an **Undo** for a few seconds.
 - **Edit** on any list: tap a task to change its title, steps (one per line), note, days and time;
   drag the handle or use the arrows to reorder. The ⋮ menu adds, renames, moves and deletes lists.
-- **Deliveries**: each delivery with the time it is due and the days it comes, earliest first.
-  Tick one when it arrives and the time is noted; an unticked one turns amber once its time has
-  passed. Arrivals go into the handover and history.
+- Tasks can carry **boxes to fill in** on the day: a number (gaps found, gaps picked), a tap
+  counter (orders that needed picking), text, a time, or a link to the Deliveries tab. Add them
+  in the task editor. A task marked **only if needed** is not counted or reported as missed
+  unless it is ticked.
+- **Deliveries**: regular deliveries with the time they are due and the days they come. Tap
+  **Arrived** and fill in when it arrived, the number of cages and whether temps are done; a
+  delivery that is not on the schedule can be logged with its type. An overdue one turns amber.
+- **Handover** is a sectioned write-up: summary, not done, done with times, skipped,
+  deliveries, anything typed into a text box, things to mention.
 - **Mention**: jot down things the next shift should know, with a photo if it helps. Photos are
   shrunk and kept on the phone (`IndexedDB`); Share on the Handover tab sends them with the text.
 - **Handover**: writes the summary (done with times, not done, things to mention) for a list.

@@ -4,7 +4,7 @@
 import {
   load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, isSkipped, DAYS, uid,
   stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate, photoIds,
-  normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries,
+  normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
 } from './store.js';
 import * as vault from './vault.js';
 import * as photos from './photos.js';
@@ -46,6 +46,13 @@ const currentList = () => state.lists.find((l) => l.id === tab) || null;
 const isSpecial = (id) => SPECIAL.some((s) => s[0] === id);
 
 const persist = () => save(state) || toast('Could not save: phone storage is full');
+
+// For typing: saves shortly after the last keystroke instead of on every one.
+let saveTimer = 0;
+function persistSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(persist, 400);
+}
 
 function commit() {
   persist();
@@ -162,8 +169,8 @@ function renderTop() {
 function tabCount(id) {
   if (id === '#mention') return state.mentions.length ? String(state.mentions.length) : '';
   if (id === '#deliveries') {
-    const due = dueDeliveries(state.deliveries, weekday());
-    return due.length ? `${due.filter((d) => state.ticks.done[d.id]).length}/${due.length}` : '';
+    const rows = summariseDeliveries(state.deliveries, state.ticks, weekday());
+    return rows.length ? `${rows.filter((d) => d.at).length}/${rows.length}` : '';
   }
   return '';
 }
@@ -312,6 +319,50 @@ function startDrag(e, list, card) {
   raf = requestAnimationFrame(autoScroll);
 }
 
+const INPUT_KINDS = [['number', 'Number'], ['counter', 'Tap counter'], ['text', 'Text'], ['time', 'Time'], ['deliveries', 'Deliveries link']];
+
+// The boxes a task asks you to fill in on the day. They sit on the card, always visible, and
+// save as you type without redrawing anything (so the keyboard stays up).
+function inputsBlock(t) {
+  const values = state.ticks.values;
+  const set = (i, v) => {
+    if (v === '' || v == null) delete values[i.id];
+    else values[i.id] = v;
+    persistSoon();
+  };
+  return h('div', { class: 'inputs' }, t.inputs.map((i) => {
+    if (i.type === 'counter') {
+      const out = h('output', { class: 'count' }, String(values[i.id] || 0));
+      const bump = (by) => {
+        const n = Math.max(0, (Number(values[i.id]) || 0) + by);
+        set(i, n || '');
+        out.textContent = String(n);
+        if (navigator.vibrate && navigator.userActivation && navigator.userActivation.hasBeenActive) navigator.vibrate(10);
+      };
+      return h('div', { class: 'input counter' },
+        h('span', { class: 'lbl' }, i.label),
+        h('button', { type: 'button', class: 'minus', 'aria-label': `One fewer: ${i.label}`, onclick: () => bump(-1) }, '−'),
+        out,
+        h('button', { type: 'button', class: 'plus', 'aria-label': `Add one: ${i.label}`, onclick: () => bump(1) }, '+1'));
+    }
+    if (i.type === 'deliveries') {
+      const rows = summariseDeliveries(state.deliveries, state.ticks, weekday());
+      const inn = rows.filter((d) => d.at);
+      return h('div', { class: 'input jump' },
+        h('span', { class: 'lbl' }, rows.length ? `${inn.length} of ${rows.length} in, temps done on ${inn.filter((d) => d.temps).length}` : 'No deliveries logged yet'),
+        btn('Log deliveries', () => { tab = '#deliveries'; render(); window.scrollTo(0, 0); }, 'small outline'));
+    }
+    if (i.type === 'text') {
+      return h('label', { class: 'input text' }, h('span', { class: 'lbl' }, i.label),
+        h('textarea', { rows: 2, value: values[i.id] || '', oninput: (e) => set(i, e.target.value) }));
+    }
+    return h('label', { class: 'input' }, h('span', { class: 'lbl' }, i.label),
+      h('input', i.type === 'time'
+        ? { type: 'time', value: values[i.id] || '', oninput: (e) => set(i, e.target.value) }
+        : { type: 'number', inputMode: 'numeric', min: 0, value: values[i.id] ?? '', oninput: (e) => set(i, e.target.value) }));
+  }));
+}
+
 function taskCard(list, t) {
   const done = state.ticks.done;
   const index = list.tasks.indexOf(t);
@@ -323,6 +374,7 @@ function taskCard(list, t) {
 
   const badges = [];
   if (skipped) badges.push(h('span', { class: 'badge' }, 'skipped today'));
+  if (t.optional) badges.push(h('span', { class: 'badge' }, 'if needed'));
   if (t.by) badges.push(h('span', { class: `badge${!isDone && !skipped && due && isLate(t) ? ' late' : ''}` }, `by ${t.by}`));
   if (t.days.length) badges.push(h('span', { class: 'badge' }, t.days.map((d) => DAYS[d]).join(' ')));
   if (t.steps.length) badges.push(h('span', { class: 'badge' }, `${stepsDone}/${t.steps.length} steps`));
@@ -349,6 +401,7 @@ function taskCard(list, t) {
           h('button', { type: 'button', 'aria-label': `Move ${t.title} up`, disabled: index === 0, onclick: () => { move(list.tasks, index, -1); commit(); } }, '↑'),
           h('button', { type: 'button', 'aria-label': `Move ${t.title} down`, disabled: index === list.tasks.length - 1, onclick: () => { move(list.tasks, index, 1); commit(); } }, '↓'))
         : h('span', { class: 'chev', 'aria-hidden': 'true' }, isOpen ? '▾' : '▸')),
+    !editing && t.inputs.length > 0 && inputsBlock(t),
     isOpen && h('div', { class: 'more' },
       t.note && h('p', { class: 'note' }, t.note),
       t.steps.length > 0 && h('ul', { class: 'steps' }, t.steps.map((s) =>
@@ -417,6 +470,19 @@ function editTask(list, t) {
   const note = h('textarea', { rows: 2, value: t ? t.note : '', placeholder: 'Anything to remember (optional)' });
   const by = h('input', { type: 'time', value: t ? t.by : '' });
 
+  const optional = h('input', { type: 'checkbox', checked: !!(t && t.optional) });
+  const inputRows = h('div', { class: 'inputrows' });
+  const addInputRow = (i = { label: '', type: 'number' }) => {
+    const label = h('input', { type: 'text', value: i.label, autocomplete: 'off', maxLength: 40, placeholder: 'What to fill in', 'aria-label': 'Box name' });
+    const type = h('select', { 'aria-label': 'Box type' }, INPUT_KINDS.map(([v, name]) => h('option', { value: v, selected: v === i.type }, name)));
+    const row = h('div', { class: 'inline inputrow' }, label, type,
+      h('button', { type: 'button', class: 'btn ghost', 'aria-label': 'Remove this box', onclick: () => row.remove() }, '×'));
+    row.read = () => ({ id: i.id, label: label.value.trim(), type: type.value });
+    inputRows.append(row);
+    return label;
+  };
+  (t ? t.inputs : []).forEach((i) => addInputRow(i));
+
   const saveTask = () => {
     if (!title.value.trim()) return title.focus();
     const next = normaliseTask({
@@ -426,6 +492,8 @@ function editTask(list, t) {
       steps: stepsFromText(steps.value, t ? t.steps : []),
       days: [...days],
       by: by.value,
+      inputs: [...inputRows.children].map((row) => row.read()),
+      optional: optional.checked,
     });
     if (isNew) list.tasks.push(next);
     else Object.assign(t, next);
@@ -438,6 +506,9 @@ function editTask(list, t) {
     field('Task', title),
     field('Steps', steps),
     field('Note', note),
+    h('div', { class: 'field' }, h('span', {}, 'Boxes to fill in on the day (optional)'), inputRows,
+      btn('+ Add a box', () => addInputRow().focus(), 'ghost')),
+    h('label', { class: 'tickrow' }, optional, h('span', {}, 'Only if needed: do not count it or report it as not done')),
     dayPicker(days),
     h('div', { class: 'field' }, h('span', {}, 'Finish by (optional)'),
       h('div', { class: 'inline' }, by, btn('Clear', () => { by.value = ''; }, 'ghost'))),
@@ -456,48 +527,86 @@ function editTask(list, t) {
 
 function deliveriesView() {
   const wd = weekday();
-  const done = state.ticks.done;
+  const ticks = state.ticks;
   const today = dueDeliveries(state.deliveries, wd);
   const other = state.deliveries.filter((d) => !isDue(d, wd));
-  const next = today.find((d) => !done[d.id] && d.time && !isOverdue(d, state.ticks));
+  const extras = ticks.arrivals.filter((a) => !a.deliveryId || !state.deliveries.some((d) => d.id === a.deliveryId));
+  const next = today.find((d) => !arrivalFor(d, ticks) && d.time && !isOverdue(d, ticks));
   const dayNames = (d) => d.days.map((x) => DAYS[x]).join(' ');
 
+  // What gets filled in once a delivery is in: when, how many cages, and whether temps are done.
+  const arrivalFields = (a) => {
+    const tempsLabel = () => (a.temps ? '✓ Temps done' : 'Temps done?');
+    const temps = h('button', {
+      type: 'button', class: `btn small temps${a.temps ? ' on' : ''}`, 'aria-pressed': String(a.temps),
+      onclick: () => {
+        a.temps = !a.temps;
+        persist();
+        temps.classList.toggle('on', a.temps);
+        temps.setAttribute('aria-pressed', String(a.temps));
+        temps.textContent = tempsLabel();
+      },
+    }, tempsLabel());
+    return h('div', { class: 'inputs arrival' },
+      h('label', { class: 'input' }, h('span', { class: 'lbl' }, 'Arrived at'),
+        h('input', { type: 'time', value: a.at, oninput: (e) => { if (e.target.value) { a.at = e.target.value; persistSoon(); } } })),
+      h('label', { class: 'input' }, h('span', { class: 'lbl' }, 'Cages'),
+        h('input', {
+          type: 'number', inputMode: 'numeric', min: 0, value: a.cages,
+          oninput: (e) => { a.cages = e.target.value === '' ? '' : Math.max(0, Math.round(Number(e.target.value) || 0)); persistSoon(); },
+        })),
+      h('div', { class: 'input wide' }, temps,
+        btn('Remove', () => withUndo('Arrival removed', () => state.ticks.arrivals.splice(state.ticks.arrivals.indexOf(a), 1)), 'small ghost')));
+  };
+
+  // A delivery from the schedule.
   const card = (d, due) => {
-    const arrived = done[d.id];
+    const a = due ? arrivalFor(d, ticks) : null;
     const badges = [];
-    if (due && arrived) badges.push(h('span', { class: 'badge' }, `arrived ${clock(arrived)}`));
-    else if (due && isOverdue(d, state.ticks)) badges.push(h('span', { class: 'badge late' }, 'not arrived yet'));
+    if (a) badges.push(h('span', { class: 'badge in' }, 'arrived'));
+    else if (due && isOverdue(d, ticks)) badges.push(h('span', { class: 'badge late' }, 'not arrived yet'));
     else if (due && d === next) badges.push(h('span', { class: 'badge next' }, 'next'));
     if (d.days.length) badges.push(h('span', { class: 'badge' }, dayNames(d)));
-    return h('article', { class: `task delivery${arrived && due ? ' done' : ''}${due ? '' : ' off'}` },
+    return h('article', { class: `task delivery${a ? ' arrived' : ''}${due ? '' : ' off'}` },
       h('div', { class: 'row' },
-        due
-          ? h('label', { class: 'check' },
-            h('input', {
-              type: 'checkbox', checked: !!arrived, 'aria-label': `Arrived: ${d.name}`,
-              onchange: (e) => {
-                if (e.target.checked) done[d.id] = Date.now();
-                else delete done[d.id];
-                commit();
-              },
-            }),
-            h('span', {}))
-          : h('span', { class: 'check' }),
-        h('button', { type: 'button', class: 'body', onclick: () => editDelivery(d) },
+        h('button', { type: 'button', class: 'body', 'aria-label': `Edit ${d.name} in the schedule`, onclick: () => editDelivery(d) },
           h('span', { class: 'title' }, d.name),
           badges.length > 0 && h('span', { class: 'meta' }, badges),
           d.note && h('span', { class: 'note' }, d.note)),
-        h('span', { class: 'when' }, d.time || '--:--')));
+        h('span', { class: 'when' }, h('small', {}, 'due'), d.time || '--:--'),
+        due && !a && h('div', { class: 'tools' },
+          h('button', { type: 'button', class: 'word arrive', onclick: () => { ticks.arrivals.push(normaliseArrival({ deliveryId: d.id })); commit(); } }, 'Arrived'))),
+      a && arrivalFields(a));
   };
 
+  // A delivery that was not on the schedule: it carries its own type.
+  const extraCard = (a) => {
+    const type = h('input', {
+      type: 'text', value: a.name, autocomplete: 'off', maxLength: 40, placeholder: 'Chilled, frozen, bread…',
+      oninput: (e) => { a.name = e.target.value; persistSoon(); },
+    });
+    type.setAttribute('list', 'delivery-types');
+    return h('article', { class: 'task delivery arrived extra', 'data-arrival': a.id },
+      h('div', { class: 'inputs' }, h('label', { class: 'input wide' }, h('span', { class: 'lbl' }, 'Type'), type)),
+      arrivalFields(a));
+  };
+
+  const nothing = !state.deliveries.length && !extras.length;
   return [
-    !state.deliveries.length && h('p', { class: 'empty' }, 'No deliveries yet. Add each one with the time it is due and the days it comes. Tick it when it arrives and the time is noted for the handover.'),
-    state.deliveries.length > 0 && !today.length && h('p', { class: 'empty' }, 'No deliveries due today.'),
+    h('datalist', { id: 'delivery-types' }, [...new Set(state.deliveries.map((d) => d.name))].map((n) => h('option', { value: n }))),
+    nothing && h('p', { class: 'empty' }, 'No deliveries yet. Log one as it arrives, or add your regular deliveries to the schedule so they are listed each day with the time they are due.'),
     ...today.map((d) => card(d, true)),
-    btn('+ Add a delivery', () => editDelivery(null), 'add'),
+    ...extras.map(extraCard),
+    btn('+ Log a delivery that arrived', () => {
+      const a = normaliseArrival({});
+      ticks.arrivals.push(a);
+      commit();
+      $(`[data-arrival="${a.id}"] input[type="text"]`)?.focus();
+    }, 'primary'),
+    btn('+ Add a regular delivery to the schedule', () => editDelivery(null), 'add'),
     other.length > 0 && h('p', { class: 'hint' }, 'Other days'),
-    ...other.sort((a, b) => (a.time || '99').localeCompare(b.time || '99')).map((d) => card(d, false)),
-    state.deliveries.length > 0 && h('p', { class: 'hint' }, 'Tap a delivery to change its time or days. Tick the box when it arrives.'),
+    ...other.sort((x, y) => (x.time || '99').localeCompare(y.time || '99')).map((d) => card(d, false)),
+    !nothing && h('p', { class: 'hint' }, 'Tap Arrived when a scheduled delivery comes in, then fill in the time, cages and temps. Tap its name to change the schedule.'),
   ];
 }
 
@@ -674,11 +783,14 @@ function dayBlock(snap, label, open) {
       l.done.length > 0 && h('ul', { class: 'log' }, l.done.map((t) => h('li', { class: 'ok' }, t.title, t.at && h('small', {}, t.at)))),
       l.missed.length > 0 && h('ul', { class: 'log' }, l.missed.map((t) => h('li', { class: 'miss' }, t.title, h('small', {}, 'not done')))),
       (l.skipped || []).length > 0 && h('ul', { class: 'log' }, l.skipped.map((t) => h('li', { class: 'miss' }, t.title, h('small', {}, 'skipped')))),
+      (l.figures || []).length > 0 && h('ul', { class: 'log' }, l.figures.map((f) => h('li', {},
+        h('span', { class: 'grow' }, f.title), h('small', {}, f.items.map((i) => `${i.label} ${i.value}`).join(', '))))),
+      (l.notes || []).map((n) => [h('h3', {}, n.label), h('p', { class: 'note' }, n.text)]),
     ]),
     (snap.deliveries || []).length > 0 && [
       h('h3', {}, 'Deliveries'),
       h('ul', { class: 'log' }, snap.deliveries.map((d) => h('li', { class: d.at ? 'ok' : 'miss' },
-        `${d.name}${d.time ? `, due ${d.time}` : ''}`, h('small', {}, d.at ? (d.at === 'yes' ? 'arrived' : `arrived ${d.at}`) : 'not arrived')))),
+        h('span', { class: 'grow' }, `${d.name}${d.time ? `, due ${d.time}` : ''}`), h('small', {}, deliveryStatus(d))))),
     ],
     snap.mentions.length > 0 && [
       h('h3', {}, 'Things to mention'),
@@ -837,6 +949,7 @@ function openMenu() {
         delete state.ticks.done[t.id];
         delete state.ticks.skipped[t.id];
         for (const s of t.steps) delete state.ticks.done[s.id];
+        for (const i of t.inputs) delete state.ticks.values[i.id];
       }
     }));
     add('Rename this list', async () => {
@@ -924,11 +1037,18 @@ function render() {
   $('#view').replaceChildren(...view.flat(Infinity).filter((n) => n != null && n !== false));
 }
 
-const busy = () => sheet.open || dragging;
+const typing = () => {
+  const el = document.activeElement;
+  return !!el && $('#view').contains(el)
+    && (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || (el.tagName === 'INPUT' && el.type !== 'checkbox'));
+};
+const busy = () => sheet.open || dragging || typing();
 
 // Leaving the app locks the codes; coming back checks whether the day has turned over.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
+    clearTimeout(saveTimer);
+    persist();
     if (vault.hasPin() && vault.status() === 'open') {
       vault.lock();
       revealed.clear();
