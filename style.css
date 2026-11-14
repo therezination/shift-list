@@ -224,20 +224,20 @@ code { font: 600 16px/1.3 ui-monospace, "Cascadia Mono", Consolas, monospace; ov
   display: flex;
   overflow-x: auto;
   scrollbar-width: none;
-  padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  padding: 6px 2px calc(6px + env(safe-area-inset-bottom));
   background: var(--card);
   border-top: 1px solid var(--line);
 }
 #tabs::-webkit-scrollbar { display: none; }
 .tab {
   flex: 1 0 auto;
-  min-width: 40px; min-height: 52px;
+  min-width: 36px; min-height: 52px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-  padding: 4px 3px;
+  padding: 4px 1px;
   border: 0; border-radius: 12px; background: none;
   color: var(--muted);
 }
-.tab b { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.tab b { font-size: 11px; letter-spacing: -0.01em; font-weight: 600; white-space: nowrap; }
 .tab small { font-size: 11px; min-height: 14px; white-space: pre; }
 .tab.on { background: var(--raise); color: var(--text); }
 .tab.on small { color: var(--text); font-weight: 700; }
@@ -392,3 +392,14 @@ select {
 .inputrows { display: flex; flex-direction: column; gap: 8px; }
 .inputrow select { flex: none; max-width: 42%; }
 .inputrow .btn { min-width: 46px; padding: 0; }
+
+/* ---------- How tab ---------- */
+
+a.btn, a.body { display: flex; text-decoration: none; color: inherit; }
+a.btn { align-items: center; justify-content: center; }
+a.btn.primary { color: var(--on-accent); }
+.btn.big { min-height: 60px; font-size: 18px; }
+input[type="url"] {
+  width: 100%; min-height: 46px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--raise);
+}

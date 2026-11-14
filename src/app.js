@@ -4,7 +4,7 @@
 import {
   load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, isSkipped, DAYS, uid,
   stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate, photoIds,
-  normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
+  normaliseLink, HOW_URL, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
 } from './store.js';
 import * as vault from './vault.js';
 import * as photos from './photos.js';
@@ -30,6 +30,7 @@ const SPECIAL = [
   ['#mention', 'Mention', 'Things to mention'],
   ['#handover', 'Handover', 'Handover'],
   ['#history', 'History', 'History'],
+  ['#how', 'How', 'How do I'],
   ['#codes', 'Codes', 'Codes'],
 ];
 
@@ -641,6 +642,44 @@ function editDelivery(d) {
   if (isNew) name.focus();
 }
 
+/* ---------- How (the Co-op "How do I" site) ---------- */
+
+// The site refuses to be shown inside another page and needs its own sign-in, so it opens
+// beside the app in the phone's browser. Shortcuts to the pages used most are kept here.
+const outLink = (label, url, cls) => h('a', { class: cls, href: url, target: '_blank', rel: 'noopener noreferrer' }, label);
+
+function howView() {
+  return [
+    outLink('Open How do I', HOW_URL, 'btn primary big'),
+    h('p', { class: 'hint' }, 'Opens how.coop.co.uk in your browser, where you sign in as usual. Press back to return here.'),
+    state.links.length > 0 && h('p', { class: 'hint' }, 'Your shortcuts'),
+    ...state.links.map((l) => h('article', { class: 'card code' },
+      outLink([h('span', { class: 'title' }, l.name), h('small', {}, l.url.replace(/^https?:\/\//, ''))], l.url, 'body'),
+      h('div', { class: 'tools' }, h('button', { type: 'button', class: 'word', 'aria-label': `Edit shortcut ${l.name}`, onclick: () => editLink(l) }, 'Edit')))),
+    btn('+ Add a shortcut', () => editLink(null), 'add'),
+    !state.links.length && h('p', { class: 'hint' }, 'Tip: when you find a page you use a lot (a process, a form), copy its address from the browser and save it here as a shortcut.'),
+  ];
+}
+
+function editLink(l) {
+  const name = h('input', { type: 'text', value: l ? l.name : '', autocomplete: 'off', maxLength: 60, placeholder: 'What the page is' });
+  const url = h('input', { type: 'url', value: l ? l.url : '', autocomplete: 'off', autocapitalize: 'off', spellcheck: false, maxLength: 500, placeholder: 'Paste the address' });
+  openSheet(l ? 'Edit shortcut' : 'New shortcut',
+    field('Name', name), field('Address', url),
+    h('div', { class: 'actions' },
+      l && btn('Delete', () => { closeSheet(); withUndo(`Deleted: ${l.name}`, () => state.links.splice(state.links.indexOf(l), 1)); }, 'danger ghost'),
+      btn('Cancel', closeSheet),
+      btn('Save', () => {
+        const next = normaliseLink({ id: l ? l.id : uid(), name: name.value, url: url.value });
+        if (!next) { toast('That does not look like a web address'); return url.focus(); }
+        if (l) Object.assign(l, next);
+        else state.links.push(next);
+        closeSheet();
+        commit();
+      }, 'primary')));
+  (l ? name : url).focus();
+}
+
 /* ---------- photos ---------- */
 
 function thumb(id, cls = 'thumb') {
@@ -1030,6 +1069,7 @@ function render() {
   const list = currentList();
   const view = list ? listView(list)
     : tab === '#deliveries' ? deliveriesView()
+    : tab === '#how' ? howView()
     : tab === '#mention' ? mentionView()
       : tab === '#handover' ? handoverView()
         : tab === '#history' ? historyView()

@@ -20,6 +20,8 @@ code, no accounts. It installs to an Android home screen as a web app and works 
   delivery that is not on the schedule can be logged with its type. An overdue one turns amber.
 - **Handover** is a sectioned write-up: summary, not done, done with times, skipped,
   deliveries, anything typed into a text box, things to mention.
+- **How**: opens how.coop.co.uk beside the app (the site cannot be shown inside another page
+  and has its own sign-in), with your own shortcuts to the pages you use most.
 - **Mention**: jot down things the next shift should know, with a photo if it helps. Photos are
   shrunk and kept on the phone (`IndexedDB`); Share on the Handover tab sends them with the text.
 - **Handover**: writes the summary (done with times, not done, things to mention) for a list.

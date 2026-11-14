@@ -281,3 +281,13 @@ test('move stays inside the array', () => {
   assert.equal(move(a, 0, 1), true);
   assert.deepEqual(a, [2, 1, 3]);
 });
+
+test('shortcuts keep only web addresses and get https:// when it is left off', async () => {
+  const { normaliseLink } = await import('../src/store.js');
+  assert.equal(normaliseLink({ name: 'RTC', url: 'how.coop.co.uk/rtc' }).url, 'https://how.coop.co.uk/rtc');
+  assert.equal(normaliseLink({ url: 'https://how.coop.co.uk/' }).name, 'how.coop.co.uk');
+  assert.equal(normaliseLink({ name: 'x', url: 'javascript:alert(1)' }), null);
+  assert.equal(normaliseLink({ name: 'x', url: '' }), null);
+  const s = normalise({ lists: [], links: [{ name: 'A', url: 'how.coop.co.uk/a' }, { url: 'data:text/html,x' }] }, at('2026-11-14T08:00:00'));
+  assert.deepEqual(s.links.map((l) => l.name), ['A']);
+});

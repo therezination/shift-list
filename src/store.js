@@ -101,6 +101,21 @@ export function normaliseArrival(a = {}, now = new Date()) {
 
 export const arrivalFor = (d, ticks) => (ticks.arrivals || []).find((a) => a.deliveryId === d.id) || null;
 
+export const HOW_URL = 'https://how.coop.co.uk/';
+
+// A saved shortcut. Only web addresses are kept; "how.coop.co.uk/x" gets https:// put in front.
+export function normaliseLink(l = {}) {
+  let url = String(l.url || '').trim();
+  if (url && !/^[a-z][a-z0-9+.-]*:/i.test(url)) url = `https://${url}`;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    return { id: l.id || uid(), name: String(l.name || '').trim() || u.hostname, url: u.href };
+  } catch {
+    return null;
+  }
+}
+
 export function normaliseDelivery(d = {}) {
   return {
     id: d.id || uid(),
@@ -185,6 +200,8 @@ export function normalise(raw, now = new Date()) {
       }
       : emptyTicks(dayKey(now)),
     settings: { hideDone: !!(raw && raw.settings && raw.settings.hideDone) },
+    // shortcuts to pages on the How site (or anywhere else), shown on the How tab
+    links: (raw && Array.isArray(raw.links) ? raw.links : []).map(normaliseLink).filter(Boolean),
     // things to mention at handover, for the current working day
     mentions: (raw && Array.isArray(raw.mentions) ? raw.mentions : [])
       .filter((m) => m && String(m.text || '').trim())
