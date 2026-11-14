@@ -103,6 +103,18 @@ export const arrivalFor = (d, ticks) => (ticks.arrivals || []).find((a) => a.del
 
 export const HOW_URL = 'https://how.coop.co.uk/';
 
+// A voice memo: when it was recorded, how long it is, its transcript (may be empty) and the
+// id of the recording in the phone's blob store.
+export function normaliseMemo(m = {}, now = new Date()) {
+  return {
+    id: m.id || uid(),
+    at: Number(m.at) || now.getTime(),
+    secs: Math.max(0, Math.round(Number(m.secs) || 0)),
+    text: String(m.text || ''),
+    audio: String(m.audio || ''),
+  };
+}
+
 // A saved shortcut. Only web addresses are kept; "how.coop.co.uk/x" gets https:// put in front.
 export function normaliseLink(l = {}) {
   let url = String(l.url || '').trim();
@@ -199,7 +211,12 @@ export function normalise(raw, now = new Date()) {
         arrivals: (raw.ticks.arrivals || []).map((a) => normaliseArrival(a, now)),
       }
       : emptyTicks(dayKey(now)),
-    settings: { hideDone: !!(raw && raw.settings && raw.settings.hideDone) },
+    settings: {
+      hideDone: !!(raw && raw.settings && raw.settings.hideDone),
+      transcribe: !(raw && raw.settings && raw.settings.transcribe === false),
+    },
+    // voice memos, newest first. They are kept until deleted (they do not reset each day).
+    memos: (raw && Array.isArray(raw.memos) ? raw.memos : []).map((m) => normaliseMemo(m, now)),
     // shortcuts to pages on the How site (or anywhere else), shown on the How tab
     links: (raw && Array.isArray(raw.links) ? raw.links : []).map(normaliseLink).filter(Boolean),
     // things to mention at handover, for the current working day
@@ -389,9 +406,11 @@ export function rollover(state, now = new Date()) {
   return true;
 }
 
-// Every photo still referenced by today's notes or by history; anything else can be deleted.
+// Every stored file (photo or recording) still referenced by today's notes, history or a
+// memo; anything else can be deleted.
 export function photoIds(state) {
   return [
+    ...(state.memos || []).map((m) => m.audio),
     ...state.mentions.map((m) => m.photo),
     ...state.history.flatMap((h) => (h.mentions || []).map((m) => m.photo)),
   ].filter(Boolean);

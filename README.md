@@ -20,6 +20,11 @@ code, no accounts. It installs to an Android home screen as a web app and works 
   delivery that is not on the schedule can be logged with its type. An overdue one turns amber.
 - **Handover** is a sectioned write-up: summary, not done, done with times, skipped,
   deliveries, anything typed into a text box, things to mention.
+- The bottom bar has five places: Checklist (switch lists at the top), Deliveries, Mention,
+  Handover and More (Voice memos, History, How do I, Codes).
+- **Voice memos**: record a note; it is kept on the phone until deleted. With "write down what
+  I say" on, the browser's speech recognition transcribes as you speak (in Chrome this sends the
+  audio to Google and needs signal). Transcripts can be corrected and added to Mention.
 - **How**: opens how.coop.co.uk beside the app (the site cannot be shown inside another page
   and has its own sign-in), with your own shortcuts to the pages you use most.
 - **Mention**: jot down things the next shift should know, with a photo if it helps. Photos are

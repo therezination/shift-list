@@ -291,3 +291,14 @@ test('shortcuts keep only web addresses and get https:// when it is left off', a
   const s = normalise({ lists: [], links: [{ name: 'A', url: 'how.coop.co.uk/a' }, { url: 'data:text/html,x' }] }, at('2026-11-14T08:00:00'));
   assert.deepEqual(s.links.map((l) => l.name), ['A']);
 });
+
+test('voice memos are kept across days and their recordings are protected from the sweep', () => {
+  const s = normalise({ lists: [], memos: [{ at: 5, secs: 12.4, text: 'Check cage 3', audio: 'a1' }, {}] }, at('2026-11-14T08:00:00'));
+  assert.deepEqual(s.memos[0], { id: s.memos[0].id, at: 5, secs: 12, text: 'Check cage 3', audio: 'a1' });
+  assert.equal(s.memos[1].audio, '');
+  assert.equal(s.settings.transcribe, true);
+  rollover(s, at('2026-11-15T08:00:00'));
+  assert.equal(s.memos.length, 2);
+  assert.deepEqual(photoIds(s), ['a1']);
+  assert.equal(normalise({ lists: [], settings: { transcribe: false } }).settings.transcribe, false);
+});

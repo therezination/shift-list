@@ -4,7 +4,7 @@
 import {
   load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, isSkipped, DAYS, uid,
   stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate, photoIds,
-  normaliseLink, HOW_URL, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
+  normaliseLink, HOW_URL, normaliseMemo, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
 } from './store.js';
 import * as vault from './vault.js';
 import * as photos from './photos.js';
@@ -32,7 +32,33 @@ const SPECIAL = [
   ['#history', 'History', 'History'],
   ['#how', 'How', 'How do I'],
   ['#codes', 'Codes', 'Codes'],
+  ['#memos', 'Voice memos', 'Voice memos'],
+  ['#more', 'More', 'More'],
 ];
+
+// The pages reached from More, with the line shown under each on that page.
+const MORE_PAGES = [
+  ['#memos', 'Voice memos', 'Record a note by voice, with a transcript'],
+  ['#history', 'History', 'What was done on past days'],
+  ['#how', 'How do I', 'Open how.coop.co.uk and your shortcuts'],
+  ['#codes', 'Codes', 'Door codes, logins and passwords'],
+];
+const inMore = (id) => MORE_PAGES.some((p) => p[0] === id);
+
+// Bottom bar icons (static artwork, never user text).
+const ICONS = {
+  lists: 'M4 6.5l2 2 3.5-4M4 15.5l2 2 3.5-4M13 7h7M13 16h7',
+  deliveries: 'M2.5 6.5h11v10h-11zM13.5 10h4l3 3v3.5h-7zM6.5 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM17 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z',
+  mention: 'M4 5h16v11H10l-5 4v-4H4z',
+  handover: 'M6 3h9l4 4v14H6zM9.5 12h6M9.5 16h6M9.5 8h3',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+};
+function icon(name) {
+  const el = document.createElement('span');
+  el.className = `ico ico-${name}`;
+  el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name]}"/></svg>`;
+  return el;
+}
 
 let state = load();
 save(state);
@@ -151,6 +177,16 @@ function deleteButton(label, fn) {
 
 /* ---------- header + tabs ---------- */
 
+// Every change of page goes through here.
+function go(id) {
+  if (rec) stopRecording();
+  if (tab === '#codes' && id !== tab) revealed.clear();
+  tab = id;
+  editing = false;
+  render();
+  window.scrollTo(0, 0);
+}
+
 function renderTop() {
   const list = currentList();
   const title = list ? list.name : SPECIAL.find((s) => s[0] === tab)[2];
@@ -161,39 +197,37 @@ function renderTop() {
   }
   const canEdit = list || (tab === '#codes' && vault.status() === 'open');
   $('#top').replaceChildren(...[
+    inMore(tab) && h('button', { type: 'button', class: 'chip back', 'aria-label': 'Back to More', onclick: () => go('#more') }, '‹'),
     h('div', { class: 'heading' }, h('h1', {}, title), h('p', {}, sub)),
     canEdit && h('button', { type: 'button', class: `chip${editing ? ' on' : ''}`, 'aria-pressed': String(editing), onclick: () => { editing = !editing; render(); } }, editing ? 'Done' : 'Edit'),
     h('button', { type: 'button', class: 'chip', 'aria-label': 'More options', onclick: openMenu }, '⋮'),
   ].filter(Boolean));
 }
 
-function tabCount(id) {
-  if (id === '#mention') return state.mentions.length ? String(state.mentions.length) : '';
-  if (id === '#deliveries') {
-    const rows = summariseDeliveries(state.deliveries, state.ticks, weekday());
-    return rows.length ? `${rows.filter((d) => d.at).length}/${rows.length}` : '';
-  }
-  return '';
-}
-
+// Five fixed places. The checklists share one (switch between them at the top of the list);
+// Voice memos, History, How and Codes live under More.
 function renderTabs() {
   const wd = weekday();
-  const tabs = [
-    ...state.lists.map((l) => {
-      const p = progress(l, state.ticks, wd);
-      return [l.id, l.name, p.total ? `${p.done}/${p.total}` : ''];
-    }),
-    ...SPECIAL.map(([id, name]) => [id, name, tabCount(id)]),
+  const list = currentList() || state.lists.find((l) => l.id === lastList) || state.lists[0];
+  const listCount = () => {
+    if (!list) return '';
+    const p = progress(list, state.ticks, wd);
+    return p.total ? `${p.done}/${p.total}` : '';
+  };
+  const deliveryCount = () => {
+    const rows = summariseDeliveries(state.deliveries, state.ticks, wd);
+    return rows.length ? `${rows.filter((d) => d.at).length}/${rows.length}` : '';
+  };
+  const items = [
+    ['lists', 'Checklist', list ? list.id : '#more', !!currentList(), listCount()],
+    ['deliveries', 'Deliveries', '#deliveries', tab === '#deliveries', deliveryCount()],
+    ['mention', 'Mention', '#mention', tab === '#mention', state.mentions.length ? String(state.mentions.length) : ''],
+    ['handover', 'Handover', '#handover', tab === '#handover', ''],
+    ['more', 'More', '#more', tab === '#more' || inMore(tab), ''],
   ];
-  $('#tabs').replaceChildren(
-    ...tabs.map(([id, name, count]) =>
-      h('button', {
-        type: 'button', class: `tab${id === tab ? ' on' : ''}`, 'aria-current': id === tab ? 'page' : null,
-        onclick: () => { if (tab === '#codes' && id !== tab) revealed.clear(); tab = id; editing = false; render(); window.scrollTo(0, 0); },
-      }, h('b', {}, name), h('small', {}, count || ' '))),
-  );
-  const on = $('#tabs .on');
-  if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  $('#tabs').replaceChildren(...items.map(([ico, name, target, on, count]) =>
+    h('button', { type: 'button', class: `tab${on ? ' on' : ''}`, 'aria-current': on ? 'page' : null, onclick: () => go(target) },
+      icon(ico), h('b', {}, name), count && h('span', { class: 'count' }, count))));
 }
 
 /* ---------- checklists ---------- */
@@ -222,6 +256,8 @@ function refreshTask(list, t) {
   }
   const toggle = view.querySelector('.hidetoggle');
   if (toggle) toggle.replaceWith(hideToggle(list));
+  const chips = view.querySelector('.listchips');
+  if (chips) chips.replaceWith(listChips());
   renderTop();
   renderTabs();
 }
@@ -417,6 +453,18 @@ function taskCard(list, t) {
   return card;
 }
 
+// Morning / Evening / … switcher at the top of a checklist.
+function listChips() {
+  const wd = weekday();
+  return h('div', { class: 'listchips', role: 'tablist', 'aria-label': 'Checklists' }, state.lists.map((l) => {
+    const p = progress(l, state.ticks, wd);
+    return h('button', {
+      type: 'button', role: 'tab', class: `chip${l.id === tab ? ' on' : ''}`, 'aria-selected': String(l.id === tab),
+      onclick: () => go(l.id),
+    }, l.name, p.total > 0 && h('small', {}, `${p.done}/${p.total}`));
+  }));
+}
+
 function hideToggle(list) {
   const wd = weekday();
   const finished = list.tasks.filter((t) => isDue(t, wd) && isFinished(t)).length;
@@ -440,6 +488,7 @@ function listView(list) {
   if (editing) out.push(h('p', { class: 'hint' }, 'Tap a task to change it. Drag the handle or use the arrows to reorder.'));
   else out.push(hideToggle(list));
   if (!list.tasks.length) out.push(h('p', { class: 'empty' }, `Nothing in ${list.name} yet. Add your first task below.`));
+  if (state.lists.length > 1) out.unshift(listChips());
   for (const t of list.tasks) if (isVisible(t)) out.push(taskCard(list, t));
   if (!editing && off.length) {
     out.push(h('p', { class: 'hint' }, `Not today: ${off.map((t) => `${t.title} (${t.days.map((d) => DAYS[d]).join(' ')})`).join(', ')}`));
@@ -678,6 +727,176 @@ function editLink(l) {
         commit();
       }, 'primary')));
   (l ? name : url).focus();
+}
+
+/* ---------- More ---------- */
+
+function moreView() {
+  return MORE_PAGES.map(([id, name, desc]) =>
+    h('button', { type: 'button', class: 'card line', onclick: () => go(id) },
+      h('span', { class: 'grow' }, h('span', { class: 'title' }, name), h('small', {}, id === '#memos' && state.memos.length ? `${state.memos.length} saved` : desc)),
+      h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
+}
+
+/* ---------- voice memos ---------- */
+
+// Recording is done by the phone (MediaRecorder) and stays on the phone. The transcript comes
+// from the browser's speech recognition, which works while you speak; in Chrome that sends the
+// audio to Google, which is why it has its own switch.
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const canRecord = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+let rec = null; // the recording in progress
+
+function listen(track) {
+  if (!SR || !state.settings.transcribe) return;
+  const r = new SR();
+  r.lang = 'en-GB';
+  r.interimResults = true;
+  // Android repeats itself in continuous mode, so there it listens one phrase at a time.
+  r.continuous = !/Android/i.test(navigator.userAgent);
+  let base = '';
+  let session = '';
+  rec.recog = r;
+  rec.heard = new Promise((resolve) => { rec.heardDone = resolve; });
+  r.onresult = (e) => {
+    let interim = '';
+    session = '';
+    for (let i = 0; i < e.results.length; i++) {
+      const said = e.results[i][0].transcript.trim();
+      if (e.results[i].isFinal) session += `${said} `;
+      else interim += `${said} `;
+    }
+    if (!rec || rec.recog !== r) return;
+    rec.text = (base + session).trim();
+    const live = $('#rec-text');
+    if (live) live.textContent = (base + session + interim).trim() || 'Listening…';
+  };
+  r.onerror = (e) => {
+    if (['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported'].includes(e.error) && rec && rec.recog === r) {
+      rec.recogFailed = true;
+      const live = $('#rec-text');
+      if (live && !rec.text) live.textContent = 'Transcription is not available right now. Still recording.';
+    }
+  };
+  r.onend = () => {
+    base += session;
+    session = '';
+    if (!rec || rec.recog !== r || rec.stopping || rec.recogFailed) return rec && rec.recog === r && rec.heardDone();
+    try {
+      r.start(track);
+    } catch {
+      rec.heardDone();
+    }
+  };
+  try {
+    r.start(track);
+  } catch {
+    rec.recog = null;
+  }
+}
+
+async function startRecording() {
+  if (rec) return;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    return toast('The microphone is blocked. Allow it for this app in your phone settings.');
+  }
+  const recorder = new MediaRecorder(stream);
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  rec = { stream, recorder, chunks, started: Date.now(), text: '', stopping: false, recog: null };
+  recorder.start(1000);
+  rec.timer = setInterval(() => {
+    const el = $('#rec-time');
+    if (el && rec) el.textContent = mmss((Date.now() - rec.started) / 1000);
+  }, 500);
+  listen(stream.getAudioTracks()[0]);
+  render();
+}
+
+async function stopRecording() {
+  const r = rec;
+  if (!r || r.stopping) return;
+  r.stopping = true;
+  clearInterval(r.timer);
+  const stopped = new Promise((resolve) => { r.recorder.onstop = resolve; });
+  try { r.recorder.stop(); } catch { /* already stopped */ }
+  if (r.recog) {
+    try { r.recog.stop(); } catch { /* not running */ }
+    await Promise.race([r.heard, pause(1500)]);
+  }
+  await Promise.race([stopped, pause(2000)]);
+  r.stream.getTracks().forEach((t) => t.stop());
+  const audio = uid();
+  let saved = true;
+  try {
+    await photos.put(audio, new Blob(r.chunks, { type: r.recorder.mimeType || 'audio/webm' }));
+  } catch {
+    saved = false;
+  }
+  rec = null;
+  if (!saved && !r.text) {
+    toast('Could not save the recording');
+    return render();
+  }
+  state.memos.unshift(normaliseMemo({ at: r.started, secs: Math.max(1, (Date.now() - r.started) / 1000), text: r.text, audio: saved ? audio : '' }));
+  commit();
+  toast(r.text ? 'Memo saved with its transcript' : 'Memo saved');
+}
+
+function player(id) {
+  const el = h('audio', { controls: true, preload: 'metadata' });
+  photos.url(id).then((u) => { if (u) el.src = u; else el.replaceWith(h('small', {}, 'The recording is not on this phone.')); });
+  return el;
+}
+
+function memoCard(m) {
+  const when = `${new Date(m.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock(m.at)}`;
+  return h('article', { class: 'card memo' },
+    h('div', { class: 'memohead' }, h('span', { class: 'title' }, when), h('small', {}, mmss(m.secs))),
+    m.audio ? player(m.audio) : h('small', {}, 'Transcript only'),
+    h('textarea', {
+      rows: 3, value: m.text, 'aria-label': `Transcript of the memo from ${when}`,
+      placeholder: 'No transcript. Type what it says if you want it in the handover.',
+      oninput: (e) => { m.text = e.target.value; persistSoon(); },
+    }),
+    h('div', { class: 'actions' },
+      btn('Delete', () => withUndo('Memo deleted', () => state.memos.splice(state.memos.indexOf(m), 1)), 'small danger ghost'),
+      btn('Copy', () => (m.text.trim() ? copyText(m.text.trim(), 'Transcript copied') : toast('There is no transcript to copy')), 'small outline'),
+      btn('Add to Mention', () => {
+        if (!m.text.trim()) return toast('Type or record a transcript first');
+        state.mentions.push({ id: uid(), text: m.text.trim(), at: Date.now(), photo: '' });
+        commit();
+        toast('Added to things to mention');
+      }, 'small outline')));
+}
+
+function memosView() {
+  if (!canRecord()) {
+    return [h('p', { class: 'empty' }, 'This browser cannot record sound. Open the installed app in Chrome on your phone.')];
+  }
+  const toggle = h('input', {
+    type: 'checkbox', checked: !!SR && state.settings.transcribe, disabled: !SR || !!rec,
+    onchange: (e) => { state.settings.transcribe = e.target.checked; persist(); },
+  });
+  return [
+    rec
+      ? h('div', { class: 'card recording' },
+        h('div', { class: 'recrow' }, h('span', { class: 'dot', 'aria-hidden': 'true' }), h('b', { id: 'rec-time' }, mmss((Date.now() - rec.started) / 1000)), h('span', {}, 'Recording')),
+        h('p', { id: 'rec-text', class: 'note', 'aria-live': 'polite' }, rec.text || (rec.recog ? 'Listening…' : 'Recording without a transcript.')),
+        btn('Stop and save', stopRecording, 'primary big'))
+      : btn('Record a voice memo', startRecording, 'primary big'),
+    h('label', { class: 'tickrow' }, toggle, h('span', {}, SR
+      ? 'Write down what I say as I speak'
+      : 'Transcripts are not available in this browser; memos are saved as recordings.')),
+    SR && h('p', { class: 'hint' }, 'The recording stays on this phone. The transcript uses your phone\'s speech recognition, which sends what you say to Google while you record, and needs signal. Turn it off to keep everything on the phone.'),
+    !state.memos.length && !rec && h('p', { class: 'empty' }, 'No memos yet. Record one and it is kept here until you delete it. You can correct the transcript and add it to things to mention.'),
+    ...state.memos.map(memoCard),
+  ];
 }
 
 /* ---------- photos ---------- */
@@ -1070,6 +1289,8 @@ function render() {
   const view = list ? listView(list)
     : tab === '#deliveries' ? deliveriesView()
     : tab === '#how' ? howView()
+    : tab === '#more' ? moreView()
+    : tab === '#memos' ? memosView()
     : tab === '#mention' ? mentionView()
       : tab === '#handover' ? handoverView()
         : tab === '#history' ? historyView()
@@ -1089,6 +1310,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     clearTimeout(saveTimer);
     persist();
+    if (rec) stopRecording();
     if (vault.hasPin() && vault.status() === 'open') {
       vault.lock();
       revealed.clear();
