@@ -1,11 +1,11 @@
 // State shape, persistence and the pure rules (what is due, what is late, day rollover).
 // Nothing here touches the DOM, so `npm test` can run it in plain Node.
 
-import { seedLists, eveningTasks, morningTasks } from './seed.js';
+import { seedLists, eveningTasks, morningTasks, GAP_LABELS } from './seed.js';
 
 export const KEY = 'shiftlist.v1';
 export const SCHEMA = 1;
-export const SEED_VERSION = 3;
+export const SEED_VERSION = 4;
 export const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // The working day rolls over at 04:00, so a late shift keeps its ticks past midnight.
@@ -147,6 +147,25 @@ export function dueDeliveries(deliveries, wd) {
 
 export const isOverdue = (d, ticks, now = new Date()) => !!d.time && !arrivalFor(d, ticks) && isLate({ by: d.time }, now);
 
+// Seed 4: gap scans record four numbers (scanned, found, picked, correct). Any task that has
+// the earlier found / picked pair gains the other two, keeping what it already has; the
+// evening gap scan gets the set if it has no boxes of its own yet.
+export function upgradeGapBoxes(lists) {
+  const full = (inputs) => {
+    const has = (label) => inputs.find((i) => i.label === label);
+    const gaps = GAP_LABELS.map((label) => has(label) || { id: uid(), label, type: 'number' });
+    return [...gaps, ...inputs.filter((i) => !GAP_LABELS.includes(i.label))];
+  };
+  for (const list of lists) {
+    for (const t of list.tasks) {
+      const labels = t.inputs.map((i) => i.label);
+      const pair = labels.includes('Gaps found') && labels.includes('Gaps picked');
+      const evening = t.title === 'Focused picking lists or full gap scan' && !t.inputs.length;
+      if (pair || evening) t.inputs = full(t.inputs);
+    }
+  }
+}
+
 export const MORNING_ORDER_VERSION = 3;
 const LATER_SCAN = 'Later picking list / gap scan (if needed)';
 
@@ -195,6 +214,7 @@ export function normalise(raw, now = new Date()) {
     const morning = lists.find((l) => l.id === 'morning');
     if (morning) upgradeMorning(morning);
   }
+  if (raw && Array.isArray(raw.lists) && (raw.seedVersion || 1) < 4) upgradeGapBoxes(lists);
   const state = {
     schema: SCHEMA,
     seedVersion: SEED_VERSION,

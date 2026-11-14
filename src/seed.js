@@ -11,7 +11,8 @@ export function seedLists() {
   ];
 }
 
-const GAPS = [{ label: 'Gaps found', type: 'number' }, { label: 'Gaps picked', type: 'number' }];
+export const GAP_LABELS = ['Gaps scanned', 'Gaps found', 'Gaps picked', 'Gaps correct'];
+const GAPS = GAP_LABELS.map((label) => ({ label, type: 'number' }));
 
 // The morning in the order it is worked. `inputs` are boxes filled in on the day
 // (number / counter / text / time / deliveries) and they feed the handover. `optional` tasks
@@ -79,6 +80,7 @@ export function eveningTasks() {
     {
       title: 'Focused picking lists or full gap scan',
       note: 'Focused picking lists around the store, OR a full gap scan of the store.',
+      inputs: GAPS,
     },
     {
       title: '3pm reductions',

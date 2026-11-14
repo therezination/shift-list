@@ -50,7 +50,7 @@ test('a fresh install has the morning in working order, with its fill-in boxes',
   ]);
   assert.ok(!titles.includes('OSA app'));
   assert.deepEqual(task(s.lists[0], 'Frozen backup').days, [1, 4, 6]);
-  assert.deepEqual(task(s.lists[0], 'AM gap scan').inputs.map((i) => `${i.label}:${i.type}`), ['Gaps found:number', 'Gaps picked:number']);
+  assert.deepEqual(task(s.lists[0], 'AM gap scan').inputs.map((i) => `${i.label}:${i.type}`), ['Gaps scanned:number', 'Gaps found:number', 'Gaps picked:number', 'Gaps correct:number']);
   assert.equal(task(s.lists[0], 'Orders that needed picking').inputs[0].type, 'counter');
   assert.equal(titles.at(-1), "Adjustments I wasn't sure of");
   const ids = s.lists.flatMap((l) => l.tasks.flatMap((t) => [t.id, ...t.steps.map((x) => x.id), ...t.inputs.map((x) => x.id)]));
@@ -89,10 +89,10 @@ test('an older install is brought up to the new morning without losing its own c
   ]);
   assert.equal(task(m, 'Later picking list / gap scan (if needed)').id, 'plg');
   assert.deepEqual(task(m, 'MyWork AM manual temp checks').steps.map((x) => x.text), ['My own step']);
-  assert.equal(task(m, 'AM gap scan').inputs.length, 2);
+  assert.equal(task(m, 'AM gap scan').inputs.length, 4);
   assert.ok(!task(m, 'Chilled backup')); // deleted by hand before: not brought back
   assert.deepEqual(s.lists[1].tasks.map((t) => t.title), ['Mine']);
-  assert.equal(s.seedVersion, 3);
+  assert.equal(s.seedVersion, 4);
 
   // and it only ever happens once
   const again = JSON.parse(JSON.stringify(s));
@@ -117,7 +117,7 @@ test('rollover files the day in history and clears everything filled in', () => 
   const gap = task(s.lists[0], 'AM gap scan');
   s.ticks.done[a.id] = at('2026-11-11T08:05:00').getTime();
   s.ticks.done[b.steps[0].id] = 1;
-  s.ticks.values[gap.inputs[0].id] = '34';
+  s.ticks.values[gap.inputs[1].id] = '34';
   s.mentions.push({ id: 'm', text: 'Freezer 2 alarm', at: at('2026-11-11T09:00:00').getTime(), photo: 'p1' });
 
   assert.equal(rollover(s, at('2026-11-11T22:00:00')), false);
@@ -219,7 +219,7 @@ test('the handover is a detailed, sectioned write-up', () => {
   const ticks = {
     done,
     skipped: { [power.id]: true },
-    values: { [gap.inputs[0].id]: '34', [gap.inputs[1].id]: '28', [orders.inputs[0].id]: 6, [adj.inputs[0].id]: 'Milk 2L, wrote off 3\n\nCrisps count looked wrong' },
+    values: { [gap.inputs[0].id]: '40', [gap.inputs[1].id]: '34', [gap.inputs[2].id]: '28', [gap.inputs[3].id]: '26', [orders.inputs[0].id]: 6, [adj.inputs[0].id]: 'Milk 2L, wrote off 3\n\nCrisps count looked wrong' },
   };
   const sum = summariseList(list, ticks, WED);
   assert.equal(sum.total, list.tasks.length - 2); // minus Frozen backup (not Wednesday) and the skipped one
@@ -236,7 +236,7 @@ test('the handover is a detailed, sectioned write-up', () => {
     '',
     'SUMMARY',
     `- Tasks: ${sum.total - 1} of ${sum.total} done, 1 not done, 1 skipped`,
-    '- AM gap scan: Gaps found 34, Gaps picked 28',
+    '- AM gap scan: Gaps scanned 40, Gaps found 34, Gaps picked 28, Gaps correct 26',
     '- Orders that needed picking: Orders 6',
     '- Deliveries: 1 of 2 in, temps done on 1',
     '',
@@ -334,4 +334,31 @@ test('handover parts and single items can be left out; summary counts stay true'
   const next = normalise(JSON.parse(JSON.stringify(s)), at('2026-11-12T08:00:00'));
   assert.deepEqual(next.ticks.omit, {});
   assert.equal(next.settings.handover.times, false);
+});
+
+test('gap scans gain scanned and correct boxes without losing what was typed', () => {
+  const now = at('2026-11-14T09:00:00');
+  const old = {
+    seedVersion: 3,
+    lists: [
+      { id: 'morning', name: 'Morning', tasks: [
+        { id: 'gap', title: 'My gap scan', inputs: [{ id: 'f', label: 'Gaps found', type: 'number' }, { id: 'p', label: 'Gaps picked', type: 'number' }, { id: 'x', label: 'Aisle', type: 'text' }] },
+        { id: 'other', title: 'Orders', inputs: [{ id: 'o', label: 'Orders', type: 'counter' }] },
+      ] },
+      { id: 'evening', name: 'Evening', tasks: [{ id: 'e', title: 'Focused picking lists or full gap scan' }] },
+    ],
+    ticks: { date: '2026-11-14', done: {}, values: { f: '34', p: '28' } },
+  };
+  const s = normalise(old, now);
+  const gap = s.lists[0].tasks[0];
+  assert.deepEqual(gap.inputs.map((i) => i.label), ['Gaps scanned', 'Gaps found', 'Gaps picked', 'Gaps correct', 'Aisle']);
+  assert.deepEqual([gap.inputs[1].id, gap.inputs[2].id], ['f', 'p']);
+  assert.equal(s.ticks.values.f, '34');
+  assert.deepEqual(s.lists[0].tasks[1].inputs.map((i) => i.label), ['Orders']);
+  assert.equal(s.lists[1].tasks[0].inputs.length, 4);
+  // only once: removing a box afterwards sticks
+  const again = JSON.parse(JSON.stringify(s));
+  again.lists[0].tasks[0].inputs.pop();
+  again.lists[0].tasks[0].inputs.shift();
+  assert.deepEqual(normalise(again, now).lists[0].tasks[0].inputs.map((i) => i.label), ['Gaps found', 'Gaps picked', 'Gaps correct']);
 });
