@@ -464,3 +464,9 @@ input[type="url"] {
 .tickrow.item { min-height: 40px; color: var(--muted); }
 .tickrow span { overflow-wrap: anywhere; }
 .pickbody > .btn { align-self: flex-start; margin-top: 12px; }
+
+/* ---------- my notes ---------- */
+
+.memo textarea { resize: none; overflow: hidden; }
+.memohead { align-items: center; }
+.card.line .badge { flex: none; }

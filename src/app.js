@@ -33,11 +33,13 @@ const SPECIAL = [
   ['#how', 'How', 'How do I'],
   ['#codes', 'Codes', 'Codes'],
   ['#memos', 'Voice memos', 'Voice memos'],
+  ['#notes', 'My notes', 'My notes'],
   ['#more', 'More', 'More'],
 ];
 
 // The pages reached from More, with the line shown under each on that page.
 const MORE_PAGES = [
+  ['#notes', 'My notes', 'Private notes, never in the handover'],
   ['#memos', 'Voice memos', 'Record a note by voice, with a transcript'],
   ['#history', 'History', 'What was done on past days'],
   ['#how', 'How do I', 'Open how.coop.co.uk and your shortcuts'],
@@ -734,9 +736,46 @@ function editLink(l) {
 function moreView() {
   return MORE_PAGES.map(([id, name, desc]) =>
     h('button', { type: 'button', class: 'card line', onclick: () => go(id) },
-      h('span', { class: 'grow' }, h('span', { class: 'title' }, name), h('small', {}, id === '#memos' && state.memos.length ? `${state.memos.length} saved` : desc)),
+      h('span', { class: 'grow' }, h('span', { class: 'title' }, name), h('small', {}, desc)),
+      id === '#memos' && state.memos.length > 0 && h('span', { class: 'badge' }, String(state.memos.length)),
+      id === '#notes' && state.notes.length > 0 && h('span', { class: 'badge' }, String(state.notes.length)),
       h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
 }
+
+/* ---------- my notes (private) ---------- */
+
+// Notes for yourself. They are kept until deleted and never go into the handover, things to
+// mention or the history.
+const fitHeight = (el) => { el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; };
+
+function notesView() {
+  const draft = h('textarea', { rows: 3, maxLength: 5000, placeholder: 'Write a note for yourself', 'aria-label': 'New note' });
+  const add = () => {
+    const text = draft.value.trim();
+    if (!text) return draft.focus();
+    state.notes.unshift({ id: uid(), text, at: Date.now() });
+    commit();
+  };
+  const card = (n) => {
+    const stamp = h('small', {}, noteDate(n.at));
+    const area = h('textarea', {
+      rows: 2, value: n.text, maxLength: 5000, 'aria-label': 'Note',
+      oninput: (e) => { n.text = e.target.value; n.at = Date.now(); stamp.textContent = noteDate(n.at); fitHeight(e.target); persistSoon(); },
+    });
+    requestAnimationFrame(() => fitHeight(area));
+    return h('article', { class: 'card memo' }, area,
+      h('div', { class: 'memohead' }, stamp,
+        btn('Delete', () => withUndo('Note deleted', () => state.notes.splice(state.notes.indexOf(n), 1)), 'small danger ghost')));
+  };
+  return [
+    draft,
+    h('div', { class: 'actions' }, btn('Add note', add, 'primary')),
+    h('p', { class: 'hint' }, 'Only for you: these never go into the handover or things to mention, and they stay until you delete them. Tap a note to change it.'),
+    ...state.notes.map(card),
+  ];
+}
+
+const noteDate = (ms) => `${new Date(ms).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock(ms)}`;
 
 /* ---------- voice memos ---------- */
 
@@ -1344,6 +1383,7 @@ function render() {
     : tab === '#how' ? howView()
     : tab === '#more' ? moreView()
     : tab === '#memos' ? memosView()
+    : tab === '#notes' ? notesView()
     : tab === '#mention' ? mentionView()
       : tab === '#handover' ? handoverView()
         : tab === '#history' ? historyView()

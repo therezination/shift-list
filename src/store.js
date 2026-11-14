@@ -238,6 +238,9 @@ export function normalise(raw, now = new Date()) {
       // which parts of the handover are written; anything not set to false is included
       handover: { ...(raw && raw.settings && raw.settings.handover) },
     },
+    // private notes: kept until deleted, never part of the handover or the history
+    notes: (raw && Array.isArray(raw.notes) ? raw.notes : [])
+      .map((n) => ({ id: n.id || uid(), text: String(n.text || ''), at: Number(n.at) || now.getTime() })),
     // voice memos, newest first. They are kept until deleted (they do not reset each day).
     memos: (raw && Array.isArray(raw.memos) ? raw.memos : []).map((m) => normaliseMemo(m, now)),
     // shortcuts to pages on the How site (or anywhere else), shown on the How tab

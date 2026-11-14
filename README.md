@@ -26,6 +26,8 @@ code, no accounts. It installs to an Android home screen as a web app and works 
 - **Voice memos**: record a note; it is kept on the phone until deleted. With "write down what
   I say" on, the browser's speech recognition transcribes as you speak (in Chrome this sends the
   audio to Google and needs signal). Transcripts can be corrected and added to Mention.
+- **My notes** (under More): private notes that are kept until deleted and never go into the
+  handover, things to mention or history.
 - **How**: opens how.coop.co.uk beside the app (the site cannot be shown inside another page
   and has its own sign-in), with your own shortcuts to the pages you use most.
 - **Mention**: jot down things the next shift should know, with a photo if it helps. Photos are

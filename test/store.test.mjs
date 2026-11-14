@@ -362,3 +362,14 @@ test('gap scans gain scanned and correct boxes without losing what was typed', (
   again.lists[0].tasks[0].inputs.shift();
   assert.deepEqual(normalise(again, now).lists[0].tasks[0].inputs.map((i) => i.label), ['Gaps found', 'Gaps picked', 'Gaps correct']);
 });
+
+test('private notes are kept across days and never reach the handover or history', () => {
+  const s = fresh();
+  s.notes.push({ id: 'n', text: 'Ask about holiday', at: 5 });
+  s.ticks.done[s.lists[0].tasks[0].id] = 1;
+  const text = handoverText(summariseList(s.lists[0], s.ticks, WED), s.mentions, s.ticks.date);
+  assert.doesNotMatch(text, /holiday/);
+  const next = normalise(JSON.parse(JSON.stringify(s)), at('2026-11-12T08:00:00'));
+  assert.deepEqual(next.notes, [{ id: 'n', text: 'Ask about holiday', at: 5 }]);
+  assert.doesNotMatch(JSON.stringify(next.history), /holiday/);
+});
