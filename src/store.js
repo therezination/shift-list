@@ -208,12 +208,15 @@ export function normalise(raw, now = new Date()) {
         done: { ...raw.ticks.done },
         skipped: { ...raw.ticks.skipped },
         values: { ...raw.ticks.values },
+        omit: { ...raw.ticks.omit },
         arrivals: (raw.ticks.arrivals || []).map((a) => normaliseArrival(a, now)),
       }
       : emptyTicks(dayKey(now)),
     settings: {
       hideDone: !!(raw && raw.settings && raw.settings.hideDone),
       transcribe: !(raw && raw.settings && raw.settings.transcribe === false),
+      // which parts of the handover are written; anything not set to false is included
+      handover: { ...(raw && raw.settings && raw.settings.handover) },
     },
     // voice memos, newest first. They are kept until deleted (they do not reset each day).
     memos: (raw && Array.isArray(raw.memos) ? raw.memos : []).map((m) => normaliseMemo(m, now)),
@@ -240,7 +243,8 @@ export function normalise(raw, now = new Date()) {
 
 // done: id -> time ticked. skipped: task id -> true. values: input id -> what was filled in.
 // arrivals: the deliveries that turned up.
-export const emptyTicks = (date) => ({ date, done: {}, skipped: {}, values: {}, arrivals: [] });
+// omit: id -> true for single items left out of today's handover.
+export const emptyTicks = (date) => ({ date, done: {}, skipped: {}, values: {}, arrivals: [], omit: {} });
 
 export const HISTORY_DAYS = 120;
 
@@ -268,24 +272,24 @@ export function summariseList(list, ticks, wd) {
   const out = { name: list.name, total: 0, done: [], missed: [], skipped: [], figures: [], notes: [] };
   for (const t of due) {
     if (isSkipped(t, ticks)) {
-      out.skipped.push({ title: t.title });
+      out.skipped.push({ id: t.id, title: t.title });
       continue;
     }
     const items = [];
     for (const i of t.inputs || []) {
       const v = values[i.id];
       if (v == null || String(v).trim() === '' || i.type === 'deliveries') continue;
-      if (i.type === 'text') out.notes.push({ label: t.title === i.label || t.inputs.length === 1 ? t.title : `${t.title}: ${i.label}`, text: String(v).trim() });
+      if (i.type === 'text') out.notes.push({ id: i.id, label: t.title === i.label || t.inputs.length === 1 ? t.title : `${t.title}: ${i.label}`, text: String(v).trim() });
       else items.push({ label: i.label, value: String(v) });
     }
-    if (items.length) out.figures.push({ title: t.title, items });
+    if (items.length) out.figures.push({ id: t.id, title: t.title, items });
     if (isIdleOptional(t, ticks)) continue;
     out.total += 1;
     if (done[t.id]) {
-      out.done.push({ title: t.title, at: typeof done[t.id] === 'number' ? hhmm(done[t.id]) : '' });
+      out.done.push({ id: t.id, title: t.title, at: typeof done[t.id] === 'number' ? hhmm(done[t.id]) : '' });
     } else {
       const stepsDone = t.steps.filter((s) => done[s.id]).length;
-      out.missed.push({ title: t.title, by: t.by || '', stepsDone, steps: t.steps.length });
+      out.missed.push({ id: t.id, title: t.title, by: t.by || '', stepsDone, steps: t.steps.length });
     }
   }
   return out;
@@ -294,13 +298,13 @@ export function summariseList(list, ticks, wd) {
 // Today's deliveries: the scheduled ones (arrived or not), then any that were not on the
 // schedule. time is when it was due, at is when it arrived ('' if it has not).
 export function summariseDeliveries(deliveries, ticks, wd) {
-  const row = (name, time, a) => ({ name, time, at: a ? a.at : '', cages: a ? a.cages : '', temps: a ? a.temps : false });
+  const row = (name, time, a, id) => ({ id, name, time, at: a ? a.at : '', cages: a ? a.cages : '', temps: a ? a.temps : false });
   const extra = (ticks.arrivals || [])
     .filter((a) => !a.deliveryId || !deliveries.some((d) => d.id === a.deliveryId))
     .sort((a, b) => a.at.localeCompare(b.at));
   return [
-    ...dueDeliveries(deliveries, wd).map((d) => row(d.name, d.time, arrivalFor(d, ticks))),
-    ...extra.map((a) => row(a.name || 'Delivery', '', a)),
+    ...dueDeliveries(deliveries, wd).map((d) => row(d.name, d.time, arrivalFor(d, ticks), d.id)),
+    ...extra.map((a) => row(a.name || 'Delivery', '', a, a.id)),
   ];
 }
 
@@ -331,7 +335,28 @@ const worthKeeping = (snap) => snap.mentions.length > 0
 // The handover write-up for one list, as plain text ready to paste or send. Short capital
 // headings and one fact per line, so it reads at a glance in a message. What still needs
 // doing comes first, because that is what the next shift acts on.
-export function handoverText(summary, mentions, dateKey, deliveries = [], now = new Date()) {
+// The parts of the handover that can be switched off, in the order they are written.
+export const HANDOVER_PARTS = [
+  ['summary', 'Summary'],
+  ['figures', 'Numbers and counts (in the summary)'],
+  ['notDone', 'Not done'],
+  ['done', 'Done'],
+  ['times', 'Times on done tasks'],
+  ['skipped', 'Skipped today'],
+  ['deliveries', 'Deliveries'],
+  ['notes', 'Text boxes (adjustments and the like)'],
+  ['mentions', 'Things to mention'],
+  ['photos', 'Photos (with Share)'],
+];
+
+// opts.parts: { key: false } switches a whole part off. opts.omit: { id: true } leaves a
+// single task, delivery, text box or thing to mention out. The counts in the summary are
+// always the true ones, whatever is left out of the lists below it.
+export function handoverText(summary, mentions, dateKey, deliveries = [], now = new Date(), opts = {}) {
+  const parts = opts.parts || {};
+  const omit = opts.omit || {};
+  const on = (key) => parts[key] !== false;
+  const kept = (rows) => rows.filter((r) => !omit[r.id]);
   const lines = [];
   const section = (title, rows) => {
     if (!rows.length) return;
@@ -350,26 +375,44 @@ export function handoverText(summary, mentions, dateKey, deliveries = [], now = 
 
   lines.push(`HANDOVER: ${summary.name.toUpperCase()}`, `${prettyDate(dateKey)}, written ${nowHHMM(now)}`);
 
-  const tasks = [`${summary.done.length} of ${summary.total} done`];
-  if (summary.missed.length) tasks.push(`${summary.missed.length} not done`);
-  if (skipped.length) tasks.push(`${skipped.length} skipped`);
-  const overview = [`- Tasks: ${tasks.join(', ')}`];
-  for (const f of figures) overview.push(`- ${f.title}: ${f.items.map((i) => `${i.label} ${i.value}`).join(', ')}`);
-  if (deliveries.length) {
-    overview.push(`- Deliveries: ${arrived.length} of ${deliveries.length} in, temps done on ${arrived.filter((d) => d.temps).length}`);
+  if (on('summary')) {
+    const tasks = [`${summary.done.length} of ${summary.total} done`];
+    if (summary.missed.length) tasks.push(`${summary.missed.length} not done`);
+    if (skipped.length) tasks.push(`${skipped.length} skipped`);
+    const overview = [`- Tasks: ${tasks.join(', ')}`];
+    if (on('figures')) for (const f of kept(figures)) overview.push(`- ${f.title}: ${f.items.map((i) => `${i.label} ${i.value}`).join(', ')}`);
+    if (deliveries.length && on('deliveries')) {
+      overview.push(`- Deliveries: ${arrived.length} of ${deliveries.length} in, temps done on ${arrived.filter((d) => d.temps).length}`);
+    }
+    section('SUMMARY', overview);
   }
-  section('SUMMARY', overview);
 
-  section(`NOT DONE (${summary.missed.length})`, summary.missed.length
-    ? summary.missed.map(missedLine)
-    : (summary.total ? ['- Nothing: everything is complete.'] : []));
-  section(`DONE (${summary.done.length})`, summary.done.map((t) => `- ${t.at ? `${t.at}  ` : ''}${t.title}`));
-  section(`SKIPPED TODAY, NOT NEEDED (${skipped.length})`, skipped.map((t) => `- ${t.title}`));
-  section('DELIVERIES', deliveries.map((d) => `- ${d.name}${d.time ? ` (due ${d.time})` : ''}: ${deliveryStatus(d)}`));
-  for (const n of notes) section(n.label.toUpperCase(), n.text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => `- ${l}`));
-  section('THINGS TO MENTION', mentions.length
-    ? mentions.map((m) => `- ${m.text}${m.photo ? ' (photo attached)' : ''}`)
-    : ['- Nothing to pass on']);
+  if (on('notDone')) {
+    const missed = kept(summary.missed);
+    section(`NOT DONE (${missed.length})`, summary.missed.length
+      ? missed.map(missedLine)
+      : (summary.total ? ['- Nothing: everything is complete.'] : []));
+  }
+  if (on('done')) {
+    const done = kept(summary.done);
+    section(`DONE (${done.length})`, done.map((t) => `- ${t.at && on('times') ? `${t.at}  ` : ''}${t.title}`));
+  }
+  if (on('skipped')) {
+    const rows = kept(skipped);
+    section(`SKIPPED TODAY, NOT NEEDED (${rows.length})`, rows.map((t) => `- ${t.title}`));
+  }
+  if (on('deliveries')) {
+    section('DELIVERIES', kept(deliveries).map((d) => `- ${d.name}${d.time ? ` (due ${d.time})` : ''}: ${deliveryStatus(d)}`));
+  }
+  if (on('notes')) {
+    for (const n of kept(notes)) section(n.label.toUpperCase(), n.text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => `- ${l}`));
+  }
+  if (on('mentions')) {
+    const rows = kept(mentions);
+    section('THINGS TO MENTION', rows.length
+      ? rows.map((m) => `- ${m.text}${m.photo && on('photos') ? ' (photo attached)' : ''}`)
+      : ['- Nothing to pass on']);
+  }
   return lines.join('\n');
 }
 

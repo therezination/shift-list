@@ -4,7 +4,7 @@
 import {
   load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, isSkipped, DAYS, uid,
   stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate, photoIds,
-  normaliseLink, HOW_URL, normaliseMemo, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
+  normaliseLink, HOW_URL, normaliseMemo, HANDOVER_PARTS, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
 } from './store.js';
 import * as vault from './vault.js';
 import * as photos from './photos.js';
@@ -996,9 +996,17 @@ async function copyText(text, label = 'Copied') {
   }
 }
 
+const partOn = (key) => state.settings.handover[key] !== false;
+
+// The photos that go with the handover: those on things to mention that are still included.
+function handoverPhotos() {
+  if (!partOn('mentions') || !partOn('photos')) return [];
+  return state.mentions.filter((m) => m.photo && !state.ticks.omit[m.id]);
+}
+
 // Shares the write-up, with the photos as attachments where the phone allows it.
 async function shareHandover(text) {
-  const ids = state.mentions.map((m) => m.photo).filter(Boolean);
+  const ids = handoverPhotos().map((m) => m.photo);
   const files = (await Promise.all(ids.map((id, i) => photos.file(id, `handover-photo-${i + 1}.jpg`)))).filter(Boolean);
   const withFiles = files.length > 0 && navigator.canShare && navigator.canShare({ files });
   try {
@@ -1008,25 +1016,70 @@ async function shareHandover(text) {
   }
 }
 
+let pickerOpen = false; // the "what to include" panel
+const pickOpen = new Set(); // parts whose item list is showing
+
+// Tickboxes for what goes into the handover: whole parts, and single items within them.
+function handoverPicker(summary, deliveries) {
+  const omit = state.ticks.omit;
+  const items = {
+    figures: summary.figures.map((f) => [f.id, `${f.title}: ${f.items.map((i) => `${i.label} ${i.value}`).join(', ')}`]),
+    notDone: summary.missed.map((t) => [t.id, t.title]),
+    done: summary.done.map((t) => [t.id, t.title]),
+    skipped: summary.skipped.map((t) => [t.id, t.title]),
+    deliveries: deliveries.map((d) => [d.id, d.name]),
+    notes: summary.notes.map((n) => [n.id, n.label]),
+    mentions: state.mentions.map((m) => [m.id, m.text]),
+  };
+  const tick = (checked, label, onchange, cls = '') => h('label', { class: `tickrow ${cls}` },
+    h('input', { type: 'checkbox', checked, onchange: (e) => { onchange(e.target.checked); persist(); render(); } }),
+    h('span', {}, label));
+
+  const rows = HANDOVER_PARTS.map(([key, label]) => {
+    const list = items[key] || [];
+    const left = list.filter(([id]) => !omit[id]).length;
+    const open = pickOpen.has(key);
+    return h('div', { class: 'part' },
+      h('div', { class: 'partrow' },
+        tick(partOn(key), list.length ? `${label} (${left} of ${list.length})` : label, (v) => { state.settings.handover[key] = v; }),
+        list.length > 0 && partOn(key) && h('button', {
+          type: 'button', class: 'link', 'aria-expanded': String(open),
+          onclick: () => { if (open) pickOpen.delete(key); else pickOpen.add(key); render(); },
+        }, open ? 'Hide items' : 'Choose items')),
+      open && partOn(key) && h('div', { class: 'partitems' }, list.map(([id, text]) =>
+        tick(!omit[id], text, (v) => { if (v) delete omit[id]; else omit[id] = true; }, 'item'))));
+  });
+
+  const changed = HANDOVER_PARTS.some(([key]) => !partOn(key)) || Object.keys(omit).length > 0;
+  return h('div', { class: 'card picker' },
+    h('button', { type: 'button', class: 'pickhead', 'aria-expanded': String(pickerOpen), onclick: () => { pickerOpen = !pickerOpen; render(); } },
+      h('span', { class: 'title' }, 'What to include'),
+      h('small', {}, changed ? 'Some things are left out' : 'Everything'),
+      h('span', { class: 'chev', 'aria-hidden': 'true' }, pickerOpen ? '▾' : '▸')),
+    pickerOpen && h('div', { class: 'pickbody' }, rows,
+      changed && btn('Include everything', () => { state.settings.handover = {}; state.ticks.omit = {}; persist(); render(); }, 'small outline')));
+}
+
 function handoverView() {
   if (!state.lists.length) return [h('p', { class: 'empty' }, 'Add a list first, then the handover is written from it.')];
   const list = state.lists.find((l) => l.id === lastList) || state.lists[0];
-  const text = handoverText(summariseList(list, state.ticks, weekday()), state.mentions, state.ticks.date,
-    summariseDeliveries(state.deliveries, state.ticks, weekday()));
+  const summary = summariseList(list, state.ticks, weekday());
+  const deliveries = summariseDeliveries(state.deliveries, state.ticks, weekday());
+  const text = handoverText(summary, state.mentions, state.ticks.date, deliveries, new Date(),
+    { parts: state.settings.handover, omit: state.ticks.omit });
   const area = h('textarea', { class: 'handover', rows: 16, value: text, 'aria-label': 'Handover text' });
-  const pics = state.mentions.filter((m) => m.photo);
+  const pics = handoverPhotos();
   return [
     h('div', { class: 'chips' }, state.lists.map((l) =>
       h('button', { type: 'button', class: `chip${l === list ? ' on' : ''}`, 'aria-pressed': String(l === list), onclick: () => { lastList = l.id; render(); } }, l.name))),
+    handoverPicker(summary, deliveries),
     area,
     pics.length > 0 && h('div', { class: 'thumbs' }, pics.map((m) =>
       h('button', { type: 'button', class: 'thumbbtn', 'aria-label': `Photo: ${m.text}`, onclick: () => viewPhoto(m.photo) }, thumb(m.photo, 'thumb big')))),
     h('div', { class: 'actions' },
       navigator.share && btn(pics.length ? `Share with ${pics.length} photo${pics.length > 1 ? 's' : ''}` : 'Share', () => shareHandover(area.value)),
       btn('Copy text', () => copyText(area.value, 'Handover copied'), 'primary')),
-    h('p', { class: 'hint' }, pics.length
-      ? 'Photos go with Share. Copy takes the text only. Add or remove photos on the Mention tab.'
-      : 'Written from your ticks and your things to mention. You can change the wording before you copy or share it. To attach a photo, add it on the Mention tab.'),
+    h('p', { class: 'hint' }, 'Tick or untick under "What to include" first, then change any wording in the box: changing a tick rewrites the text. Which parts are included is remembered; single items you untick come back tomorrow.'),
   ];
 }
 

@@ -127,8 +127,8 @@ test('rollover files the day in history and clears everything filled in', () => 
   const day = s.history[0];
   assert.equal(day.date, '2026-11-11');
   assert.deepEqual(day.lists.map((l) => l.name), ['Morning', 'Evening']);
-  assert.deepEqual(day.lists[0].done, [{ title: a.title, at: '08:05' }]);
-  assert.deepEqual(day.lists[0].figures, [{ title: 'AM gap scan', items: [{ label: 'Gaps found', value: '34' }] }]);
+  assert.deepEqual(day.lists[0].done, [{ id: a.id, title: a.title, at: '08:05' }]);
+  assert.deepEqual(day.lists[0].figures, [{ id: gap.id, title: 'AM gap scan', items: [{ label: 'Gaps found', value: '34' }] }]);
   assert.equal(day.mentions[0].photo, 'p1');
   assert.deepEqual(photoIds(s), ['p1']);
   // Wednesday: Frozen backup (Mon Thu Sat) was not due, so it is not "missed"
@@ -180,8 +180,8 @@ test('deliveries: due by weekday, earliest first, overdue until one arrives', ()
   assert.ok(!isOverdue(today[0], s.ticks, now));
 
   const sum = summariseDeliveries(s.deliveries, s.ticks, WED);
-  assert.deepEqual(sum[0], { name: 'Greencore', time: '06:30', at: '06:42', cages: 4, temps: true });
-  assert.deepEqual(sum.at(-1), { name: 'Ambient', time: '', at: '07:00', cages: 1, temps: false });
+  assert.deepEqual(sum[0], { id: 'g', name: 'Greencore', time: '06:30', at: '06:42', cages: 4, temps: true });
+  assert.deepEqual(sum.at(-1), { id: s.ticks.arrivals[1].id, name: 'Ambient', time: '', at: '07:00', cages: 1, temps: false });
   assert.equal(deliveryStatus(sum[0]), 'arrived 06:42, 4 cages, temps done');
   assert.equal(deliveryStatus(sum.at(-1)), 'arrived 07:00, 1 cage, temps NOT done');
   assert.equal(deliveryStatus(sum[1]), 'not arrived');
@@ -268,7 +268,7 @@ test('"only if needed" tasks are not counted or reported as missed until ticked,
   s.ticks.values[orders.inputs[0].id] = 3;
   let sum = summariseList(list, s.ticks, WED);
   assert.ok(!sum.missed.some((t) => t.title === orders.title));
-  assert.deepEqual(sum.figures, [{ title: orders.title, items: [{ label: 'Orders', value: '3' }] }]);
+  assert.deepEqual(sum.figures, [{ id: orders.id, title: orders.title, items: [{ label: 'Orders', value: '3' }] }]);
   s.ticks.done[orders.id] = 1;
   sum = summariseList(list, s.ticks, WED);
   assert.equal(sum.total, base + 1);
@@ -301,4 +301,37 @@ test('voice memos are kept across days and their recordings are protected from t
   assert.equal(s.memos.length, 2);
   assert.deepEqual(photoIds(s), ['a1']);
   assert.equal(normalise({ lists: [], settings: { transcribe: false } }).settings.transcribe, false);
+});
+
+test('handover parts and single items can be left out; summary counts stay true', () => {
+  const s = fresh();
+  const list = s.lists[0];
+  const [a, b, c] = list.tasks;
+  s.ticks.done[a.id] = at('2026-11-11T07:30:00').getTime();
+  s.ticks.done[b.id] = at('2026-11-11T07:45:00').getTime();
+  const sum = summariseList(list, s.ticks, WED);
+  const mentions = [{ id: 'm1', text: 'Short on milk' }, { id: 'm2', text: 'Private note', photo: 'p' }];
+  const dels = [{ id: 'd1', name: 'Chilled', time: '06:30', at: '06:42', cages: 4, temps: true }];
+  const write = (opts) => handoverText(sum, mentions, '2026-11-11', dels, at('2026-11-11T13:00:00'), opts);
+
+  const full = write({});
+  assert.equal(full, write(undefined));
+  assert.match(full, /- 07:30 {2}MyWork AM manual temp checks/);
+
+  const text = write({ parts: { times: false, deliveries: false, skipped: false, photos: false }, omit: { [b.id]: true, [c.id]: true, m2: true } });
+  assert.match(text, /- Tasks: 2 of \d+ done/); // true count, though one done task is left out
+  assert.match(text, /\nDONE \(1\)\n- MyWork AM manual temp checks\n/);
+  assert.doesNotMatch(text, /store checks before store opens|Chilled backup|DELIVERIES|Deliveries:|Private note|07:30/);
+  assert.match(text, /THINGS TO MENTION\n- Short on milk$/);
+
+  assert.doesNotMatch(write({ parts: { summary: false } }), /SUMMARY/);
+  assert.doesNotMatch(write({ parts: { mentions: false } }), /THINGS TO MENTION/);
+  assert.match(write({ omit: { m1: true, m2: true } }), /THINGS TO MENTION\n- Nothing to pass on$/);
+
+  // unticked items come back the next day; switched-off parts are remembered
+  s.ticks.omit.m1 = true;
+  s.settings.handover.times = false;
+  const next = normalise(JSON.parse(JSON.stringify(s)), at('2026-11-12T08:00:00'));
+  assert.deepEqual(next.ticks.omit, {});
+  assert.equal(next.settings.handover.times, false);
 });
