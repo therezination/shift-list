@@ -18,9 +18,10 @@ code, no accounts. It installs to an Android home screen as a web app and works 
 - **Deliveries**: regular deliveries with the time they are due and the days they come. Tap
   **Arrived** and fill in when it arrived, the number of cages and whether temps are done; a
   delivery that is not on the schedule can be logged with its type. An overdue one turns amber.
-- **Handover** is a sectioned write-up: summary, not done, done with times, skipped,
-  deliveries, anything typed into a text box, things to mention. **What to include** has a
-  tickbox for each part and for each single item in it.
+- **Handover** is short by default: "AM tasks done", the numbers filled in (gaps, orders),
+  deliveries, text boxes and things to mention, with no not-done list. **What to include** has a
+  tickbox for each part and each single item, and a "Detailed write-up" option for the full
+  task lists.
 - The bottom bar has five places: Checklist (switch lists at the top), Deliveries, Mention,
   Handover and More (Voice memos, History, How do I, Codes).
 - **Voice memos**: record a note; it is kept on the phone until deleted. With "write down what

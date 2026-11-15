@@ -229,7 +229,8 @@ test('the handover is a detailed, sectioned write-up', () => {
     { name: 'Greencore', time: '06:30', at: '06:42', cages: 4, temps: true },
     { name: 'Bread', time: '07:15', at: '', cages: '', temps: false },
   ];
-  const text = handoverText(sum, [{ text: 'Short on milk' }, { text: 'Damaged delivery', photo: 'p1' }], '2026-11-11', deliveries, at('2026-11-11T13:58:00'));
+  const FULL = { parts: { detailed: true, notDone: true } };
+  const text = handoverText(sum, [{ text: 'Short on milk' }, { text: 'Damaged delivery', photo: 'p1' }], '2026-11-11', deliveries, at('2026-11-11T13:58:00'), FULL);
   const expectStart = [
     'HANDOVER: MORNING',
     'Wed 11 Nov, written 13:58',
@@ -253,7 +254,7 @@ test('the handover is a detailed, sectioned write-up', () => {
   assert.ok(text.endsWith('THINGS TO MENTION\n- Short on milk\n- Damaged delivery (photo attached)'));
   assert.doesNotMatch(text, /Frozen backup/);
 
-  const empty = handoverText(summariseList(list, emptyTicks('2026-11-11'), WED), [], '2026-11-11', [], at('2026-11-11T06:00:00'));
+  const empty = handoverText(summariseList(list, emptyTicks('2026-11-11'), WED), [], '2026-11-11', [], at('2026-11-11T06:00:00'), FULL);
   assert.doesNotMatch(empty, /\nDONE|\nDELIVERIES|\nSKIPPED/);
   assert.match(empty, /THINGS TO MENTION\n- Nothing to pass on$/);
 });
@@ -312,10 +313,11 @@ test('handover parts and single items can be left out; summary counts stay true'
   const sum = summariseList(list, s.ticks, WED);
   const mentions = [{ id: 'm1', text: 'Short on milk' }, { id: 'm2', text: 'Private note', photo: 'p' }];
   const dels = [{ id: 'd1', name: 'Chilled', time: '06:30', at: '06:42', cages: 4, temps: true }];
-  const write = (opts) => handoverText(sum, mentions, '2026-11-11', dels, at('2026-11-11T13:00:00'), opts);
+  const write = (opts = {}) => handoverText(sum, mentions, '2026-11-11', dels, at('2026-11-11T13:00:00'),
+    { ...opts, parts: { detailed: true, notDone: true, ...(opts.parts || {}) } });
 
   const full = write({});
-  assert.equal(full, write(undefined));
+
   assert.match(full, /- 07:30 {2}MyWork AM manual temp checks/);
 
   const text = write({ parts: { times: false, deliveries: false, skipped: false, photos: false }, omit: { [b.id]: true, [c.id]: true, m2: true } });
@@ -390,4 +392,41 @@ test('cashing up: bag values, totals in whole pence, and a fresh count each day'
   assert.equal(same.ticks.cash['20p'], 2);
   const next = normalise(JSON.parse(JSON.stringify(s)), at('2026-11-12T08:00:00'));
   assert.deepEqual(next.ticks.cash, {});
+});
+
+test('the handover is short by default: a tasks-done line, the figures, never the not-done list', () => {
+  const s = fresh();
+  const list = s.lists[0];
+  const gap = task(list, 'AM gap scan');
+  const orders = task(list, 'Orders that needed picking');
+  const adj = task(list, "Adjustments I wasn't sure of");
+  for (const t of list.tasks) if (!t.optional) s.ticks.done[t.id] = 1;
+  Object.assign(s.ticks.values, {
+    [gap.inputs[0].id]: '40', [gap.inputs[1].id]: '34', [gap.inputs[2].id]: '28', [gap.inputs[3].id]: '26',
+    [orders.inputs[0].id]: 6, [adj.inputs[0].id]: 'Milk 2L wrote off 3\nCrisps count',
+  });
+  const dels = [
+    { id: 'c', name: 'Chilled', time: '06:30', at: '06:42', cages: 4, temps: true },
+    { id: 'b', name: 'Bread', time: '07:15', at: '', cages: '', temps: false },
+  ];
+  const write = (opts) => handoverText(summariseList(list, s.ticks, WED), [{ id: 'm', text: 'Short on milk', photo: 'p' }], '2026-11-11', dels, at('2026-11-11T13:58:00'), opts);
+  assert.equal(write(), [
+    'HANDOVER: AM, Wed 11 Nov, 13:58',
+    '',
+    'AM tasks done',
+    'AM gap scan: 40 scanned, 34 found, 28 picked, 26 correct',
+    'Orders that needed picking: 6',
+    "Adjustments I wasn't sure of: Milk 2L wrote off 3; Crisps count",
+    'Deliveries: Chilled 06:42, 4 cages, temps done; Bread (due 07:15) not in yet',
+    '',
+    'To mention:',
+    '- Short on milk (photo)',
+  ].join('\n').replace(/\n(Adjustments.*)\n(Deliveries.*)/, '\n$2\n$1'));
+
+  delete s.ticks.done[list.tasks[0].id];
+  const partial = write();
+  assert.match(partial, /\nAM tasks done: \d+ of \d+\n/);
+  assert.doesNotMatch(partial, /NOT DONE|not done|MyWork AM manual/);
+  assert.match(handoverText(summariseList(s.lists[1], s.ticks, WED), [], '2026-11-11'), /^HANDOVER: PM, /);
+  assert.doesNotMatch(write({ parts: { figures: false, deliveries: false } }), /gap scan|Deliveries/);
 });

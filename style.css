@@ -186,7 +186,7 @@ input[type="text"], input[type="password"], input[type="time"], textarea {
   background: var(--raise);
 }
 textarea { resize: vertical; line-height: 1.45; }
-textarea.handover { font-size: 15px; min-height: 300px; }
+textarea.handover { font-size: 15px; min-height: 140px; resize: none; overflow: hidden; }
 ::placeholder { color: var(--muted); opacity: 0.8; }
 
 .field { display: flex; flex-direction: column; gap: 6px; }

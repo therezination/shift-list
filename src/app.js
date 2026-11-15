@@ -4,7 +4,7 @@
 import {
   load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, isSkipped, DAYS, uid,
   stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate, photoIds,
-  normaliseLink, HOW_URL, normaliseMemo, HANDOVER_PARTS, CASH_BAGS, cashTotals, money, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
+  normaliseLink, HOW_URL, normaliseMemo, HANDOVER_PARTS, handoverPartOn, CASH_BAGS, cashTotals, money, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
 } from './store.js';
 import * as vault from './vault.js';
 import * as photos from './photos.js';
@@ -827,7 +827,7 @@ function notesBlock() {
       rows: 2, value: n.text, maxLength: 5000, 'aria-label': 'Note',
       oninput: (e) => { n.text = e.target.value; n.at = Date.now(); stamp.textContent = noteDate(n.at); fitHeight(e.target); persistSoon(); },
     });
-    requestAnimationFrame(() => fitHeight(area));
+    setTimeout(() => fitHeight(area));
     return h('article', { class: 'card memo' }, area,
       h('div', { class: 'memohead' }, stamp,
         btn('Delete', () => withUndo('Note deleted', () => state.notes.splice(state.notes.indexOf(n), 1)), 'small danger ghost')));
@@ -1112,7 +1112,7 @@ async function copyText(text, label = 'Copied') {
   }
 }
 
-const partOn = (key) => state.settings.handover[key] !== false;
+const partOn = (key) => handoverPartOn(state.settings.handover, key);
 
 // The photos that go with the handover: those on things to mention that are still included.
 function handoverPhotos() {
@@ -1151,7 +1151,7 @@ function handoverPicker(summary, deliveries) {
     h('input', { type: 'checkbox', checked, onchange: (e) => { onchange(e.target.checked); persist(); render(); } }),
     h('span', {}, label));
 
-  const rows = HANDOVER_PARTS.map(([key, label]) => {
+  const rows = HANDOVER_PARTS.filter(([, , full]) => !full || partOn('detailed')).map(([key, label]) => {
     const list = items[key] || [];
     const left = list.filter(([id]) => !omit[id]).length;
     const open = pickOpen.has(key);
@@ -1166,14 +1166,14 @@ function handoverPicker(summary, deliveries) {
         tick(!omit[id], text, (v) => { if (v) delete omit[id]; else omit[id] = true; }, 'item'))));
   });
 
-  const changed = HANDOVER_PARTS.some(([key]) => !partOn(key)) || Object.keys(omit).length > 0;
+  const changed = Object.keys(state.settings.handover).length > 0 || Object.keys(omit).length > 0;
   return h('div', { class: 'card picker' },
     h('button', { type: 'button', class: 'pickhead', 'aria-expanded': String(pickerOpen), onclick: () => { pickerOpen = !pickerOpen; render(); } },
       h('span', { class: 'title' }, 'What to include'),
-      h('small', {}, changed ? 'Some things are left out' : 'Everything'),
+      h('small', {}, `${partOn('detailed') ? 'Detailed' : 'Short'}${changed ? ', changed' : ''}`),
       h('span', { class: 'chev', 'aria-hidden': 'true' }, pickerOpen ? '▾' : '▸')),
     pickerOpen && h('div', { class: 'pickbody' }, rows,
-      changed && btn('Include everything', () => { state.settings.handover = {}; state.ticks.omit = {}; persist(); render(); }, 'small outline')));
+      changed && btn('Back to the usual', () => { state.settings.handover = {}; state.ticks.omit = {}; persist(); render(); }, 'small outline')));
 }
 
 function handoverView() {
@@ -1183,7 +1183,8 @@ function handoverView() {
   const deliveries = summariseDeliveries(state.deliveries, state.ticks, weekday());
   const text = handoverText(summary, state.mentions, state.ticks.date, deliveries, new Date(),
     { parts: state.settings.handover, omit: state.ticks.omit });
-  const area = h('textarea', { class: 'handover', rows: 16, value: text, 'aria-label': 'Handover text' });
+  const area = h('textarea', { class: 'handover', rows: 6, value: text, 'aria-label': 'Handover text', oninput: (e) => fitHeight(e.target) });
+  setTimeout(() => fitHeight(area));
   const pics = handoverPhotos();
   return [
     h('div', { class: 'chips' }, state.lists.map((l) =>
@@ -1195,7 +1196,7 @@ function handoverView() {
     h('div', { class: 'actions' },
       navigator.share && btn(pics.length ? `Share with ${pics.length} photo${pics.length > 1 ? 's' : ''}` : 'Share', () => shareHandover(area.value)),
       btn('Copy text', () => copyText(area.value, 'Handover copied'), 'primary')),
-    h('p', { class: 'hint' }, 'Tick or untick under "What to include" first, then change any wording in the box: changing a tick rewrites the text. Which parts are included is remembered; single items you untick come back tomorrow.'),
+    h('p', { class: 'hint' }, 'Short by default. Tick "Detailed write-up" under "What to include" for the full task lists. Set the ticks first, then change any wording in the box: changing a tick rewrites the text. Which parts are included is remembered; single items you untick come back tomorrow.'),
   ];
 }
 

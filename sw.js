@@ -2,7 +2,7 @@
 // go and never changed afterwards, so the app can never run a mix of old and new files. A new
 // version is picked up when this file changes: bump VERSION on every release.
 
-const VERSION = 'shiftlist-13';
+const VERSION = 'shiftlist-14';
 const SHELL = [
   './',
   'index.html',

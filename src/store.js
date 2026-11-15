@@ -387,19 +387,67 @@ const worthKeeping = (snap) => snap.mentions.length > 0
 // The handover write-up for one list, as plain text ready to paste or send. Short capital
 // headings and one fact per line, so it reads at a glance in a message. What still needs
 // doing comes first, because that is what the next shift acts on.
-// The parts of the handover that can be switched off, in the order they are written.
+// The parts of the handover that can be switched on or off. `full` marks parts that only exist
+// in the detailed write-up.
 export const HANDOVER_PARTS = [
-  ['summary', 'Summary'],
-  ['figures', 'Numbers and counts (in the summary)'],
-  ['notDone', 'Not done'],
-  ['done', 'Done'],
-  ['times', 'Times on done tasks'],
-  ['skipped', 'Skipped today'],
+  ['detailed', 'Detailed write-up (task lists)'],
+  ['summary', 'Tasks done line'],
+  ['figures', 'Numbers and counts'],
+  ['notDone', 'Not done', 'full'],
+  ['done', 'Done', 'full'],
+  ['times', 'Times on done tasks', 'full'],
+  ['skipped', 'Skipped today', 'full'],
   ['deliveries', 'Deliveries'],
   ['notes', 'Text boxes (adjustments and the like)'],
   ['mentions', 'Things to mention'],
   ['photos', 'Photos (with Share)'],
 ];
+
+// Parts that are off until switched on: the handover is short by default and never lists
+// what was not done unless asked to.
+const PART_DEFAULT_OFF = { detailed: true, notDone: true };
+export const handoverPartOn = (parts = {}, key) => (key in parts ? parts[key] !== false : !PART_DEFAULT_OFF[key]);
+
+// "Morning" -> "AM", "Evening" -> "PM", anything else as it is.
+export const shiftName = (name) => ({ morning: 'AM', evening: 'PM' }[String(name).trim().toLowerCase()] || name);
+
+// "Gaps scanned 40, Gaps found 34" -> "40 scanned, 34 found"; a single box shows just its value.
+function figureText(f) {
+  if (f.items.length === 1) return f.items[0].value;
+  const first = (l) => l.split(' ')[0].toLowerCase();
+  const shared = f.items.every((i) => i.label.includes(' ') && first(i.label) === first(f.items[0].label));
+  return f.items.map((i) => `${i.value} ${(shared ? i.label.slice(i.label.indexOf(' ') + 1) : i.label).toLowerCase()}`).join(', ');
+}
+
+// "Chilled 06:42, 4 cages, temps done" / "Bread (due 07:15) not in yet"
+function deliveryShort(d) {
+  if (!d.at) return `${d.name}${d.time ? ` (due ${d.time})` : ''} not in yet`;
+  return `${d.name} ${deliveryStatus(d).replace(/^arrived /, '').replace(/^arrived$/, 'in')}`;
+}
+
+// The short handover: a line for the tasks, then only what the next shift needs to know.
+function compactHandover(summary, mentions, dateKey, deliveries, now, on, kept) {
+  const shift = shiftName(summary.name);
+  const lines = [`HANDOVER: ${shift}, ${prettyDate(dateKey)}, ${nowHHMM(now)}`, ''];
+  if (on('summary') && summary.total) {
+    const all = summary.done.length === summary.total;
+    lines.push(all ? `${shift} tasks done` : `${shift} tasks done: ${summary.done.length} of ${summary.total}`);
+  }
+  if (on('figures')) for (const f of kept(summary.figures || [])) lines.push(`${f.title}: ${figureText(f)}`);
+  const dels = on('deliveries') ? kept(deliveries) : [];
+  if (dels.length) lines.push(`Deliveries: ${dels.map(deliveryShort).join('; ')}`);
+  if (on('notes')) {
+    for (const n of kept(summary.notes || [])) {
+      lines.push(`${n.label}: ${n.text.split('\n').map((l) => l.trim()).filter(Boolean).join('; ')}`);
+    }
+  }
+  if (on('mentions')) {
+    const rows = kept(mentions);
+    if (rows.length) lines.push('', 'To mention:', ...rows.map((m) => `- ${m.text}${m.photo && on('photos') ? ' (photo)' : ''}`));
+  }
+  while (lines.at(-1) === '') lines.pop();
+  return lines.join('\n');
+}
 
 // opts.parts: { key: false } switches a whole part off. opts.omit: { id: true } leaves a
 // single task, delivery, text box or thing to mention out. The counts in the summary are
@@ -407,8 +455,9 @@ export const HANDOVER_PARTS = [
 export function handoverText(summary, mentions, dateKey, deliveries = [], now = new Date(), opts = {}) {
   const parts = opts.parts || {};
   const omit = opts.omit || {};
-  const on = (key) => parts[key] !== false;
+  const on = (key) => handoverPartOn(parts, key);
   const kept = (rows) => rows.filter((r) => !omit[r.id]);
+  if (!on('detailed')) return compactHandover(summary, mentions, dateKey, deliveries, now, on, kept);
   const lines = [];
   const section = (title, rows) => {
     if (!rows.length) return;
