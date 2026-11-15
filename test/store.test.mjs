@@ -373,3 +373,21 @@ test('private notes are kept across days and never reach the handover or history
   assert.deepEqual(next.notes, [{ id: 'n', text: 'Ask about holiday', at: 5 }]);
   assert.doesNotMatch(JSON.stringify(next.history), /holiday/);
 });
+
+test('cashing up: bag values, totals in whole pence, and a fresh count each day', async () => {
+  const { cashTotals, money } = await import('../src/store.js');
+  const t = cashTotals({ '1p': 3, '2p': 1, '5p': 2, '10p': 1, '20p': 4, x: 9, '50p': -2 });
+  assert.deepEqual(t.rows.filter((r) => r.count).map((r) => [r.coin, r.count, r.pence]),
+    [['1p', 3, 300], ['2p', 1, 100], ['5p', 2, 1000], ['10p', 1, 500], ['20p', 4, 4000]]);
+  assert.equal(t.bags, 11);
+  assert.equal(t.pence, 5900);
+  assert.equal(money(t.pence), '£59.00');
+  assert.equal(money(123456), '£1,234.56');
+
+  const s = fresh();
+  s.ticks.cash['20p'] = 2;
+  const same = normalise(JSON.parse(JSON.stringify(s)), at('2026-11-11T22:00:00'));
+  assert.equal(same.ticks.cash['20p'], 2);
+  const next = normalise(JSON.parse(JSON.stringify(s)), at('2026-11-12T08:00:00'));
+  assert.deepEqual(next.ticks.cash, {});
+});

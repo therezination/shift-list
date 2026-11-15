@@ -4,7 +4,7 @@
 import {
   load, save, rollover, normalise, normaliseTask, weekday, isDue, isLate, isSkipped, DAYS, uid,
   stepsFromText, progress, move, summariseList, snapshot, handoverText, prettyDate, photoIds,
-  normaliseLink, HOW_URL, normaliseMemo, HANDOVER_PARTS, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
+  normaliseLink, HOW_URL, normaliseMemo, HANDOVER_PARTS, CASH_BAGS, cashTotals, money, normaliseDelivery, dueDeliveries, isOverdue, summariseDeliveries, arrivalFor, normaliseArrival, deliveryStatus,
 } from './store.js';
 import * as vault from './vault.js';
 import * as photos from './photos.js';
@@ -34,11 +34,13 @@ const SPECIAL = [
   ['#codes', 'Codes', 'Codes'],
   ['#memos', 'Voice memos', 'Voice memos'],
   ['#notes', 'My notes', 'My notes'],
+  ['#cash', 'Cashing up', 'Cashing up'],
   ['#more', 'More', 'More'],
 ];
 
 // The pages reached from More, with the line shown under each on that page.
 const MORE_PAGES = [
+  ['#cash', 'Cashing up', 'Count bags of change'],
   ['#notes', 'My notes', 'Private notes, never in the handover'],
   ['#memos', 'Voice memos', 'Record by voice with a transcript, plus your notes'],
   ['#history', 'History', 'What was done on past days'],
@@ -739,7 +741,67 @@ function moreView() {
       h('span', { class: 'grow' }, h('span', { class: 'title' }, name), h('small', {}, desc)),
       id === '#memos' && state.memos.length > 0 && h('span', { class: 'badge' }, String(state.memos.length)),
       id === '#notes' && state.notes.length > 0 && h('span', { class: 'badge' }, String(state.notes.length)),
+      id === '#cash' && cashTotals(state.ticks.cash).bags > 0 && h('span', { class: 'badge' }, money(cashTotals(state.ticks.cash).pence)),
       h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
+}
+
+/* ---------- cashing up ---------- */
+
+// Bags of change counted with +1 / −1. Taps update the numbers in place (no redraw), so it
+// stays quick to tap repeatedly. The counts reset with the day at 4am.
+function cashView() {
+  const counts = state.ticks.cash;
+  const total = h('b', { class: 'cashtotal' });
+  const bagsLine = h('small', {});
+  const showTotals = () => {
+    const t = cashTotals(counts);
+    total.textContent = money(t.pence);
+    bagsLine.textContent = `${t.bags} bag${t.bags === 1 ? '' : 's'}`;
+  };
+
+  const row = ([id, coin, bag]) => {
+    const count = h('output', { class: 'count' });
+    const sub = h('small', { class: 'sub' });
+    const minus = h('button', { type: 'button', class: 'minus', 'aria-label': `One fewer ${coin} bag` }, '−1');
+    const show = () => {
+      const n = counts[id] || 0;
+      count.textContent = String(n);
+      sub.textContent = money(n * bag);
+      minus.disabled = n === 0;
+    };
+    const bump = (by) => {
+      const n = Math.max(0, (counts[id] || 0) + by);
+      if (n) counts[id] = n;
+      else delete counts[id];
+      persistSoon();
+      show();
+      showTotals();
+      if (navigator.vibrate && navigator.userActivation && navigator.userActivation.hasBeenActive) navigator.vibrate(10);
+    };
+    minus.addEventListener('click', () => bump(-1));
+    show();
+    return h('div', { class: 'card cashrow' },
+      h('span', { class: 'coin' }, h('b', {}, coin), h('small', {}, `${money(bag)} a bag`)),
+      minus,
+      count,
+      h('button', { type: 'button', class: 'plus', 'aria-label': `Add a ${coin} bag`, onclick: () => bump(1) }, '+1'),
+      sub);
+  };
+
+  showTotals();
+  return [
+    ...CASH_BAGS.map(row),
+    h('div', { class: 'actions' },
+      btn('Copy totals', () => {
+        const t = cashTotals(counts);
+        const lines = t.rows.filter((r) => r.count).map((r) => `${r.coin}: ${r.count} × ${money(r.bag)} = ${money(r.pence)}`);
+        copyText([...lines, `Total: ${t.bags} bags, ${money(t.pence)}`].join('\n'), 'Totals copied');
+      }, 'small outline'),
+      btn('Start again', () => withUndo('Counts cleared', () => { state.ticks.cash = {}; }), 'small danger ghost')),
+    h('p', { class: 'hint' }, 'Tap +1 for each full bag. The total updates as you tap. The counts clear themselves at 4am, or use Start again.'),
+    // last, and pinned to the bottom of the screen, so the total is always in view
+    h('div', { class: 'cashsum', 'aria-live': 'polite' }, h('span', {}, 'Total'), total, bagsLine),
+  ];
 }
 
 /* ---------- my notes (private) ---------- */
@@ -1399,6 +1461,7 @@ function render() {
     : tab === '#more' ? moreView()
     : tab === '#memos' ? memosView()
     : tab === '#notes' ? notesView()
+    : tab === '#cash' ? cashView()
     : tab === '#mention' ? mentionView()
       : tab === '#handover' ? handoverView()
         : tab === '#history' ? historyView()

@@ -1,6 +1,6 @@
 {
   "name": "shift-list",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "private": true,
   "description": "Phone checklist for work shifts: morning and evening lists, things to mention, handover, history and codes.",
   "type": "module",

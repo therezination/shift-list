@@ -473,3 +473,36 @@ input[type="url"] {
 
 .sectionhead { margin: 14px 2px 0; font-size: 18px; }
 .memo .actions { justify-content: flex-start; }
+
+/* ---------- cashing up ---------- */
+
+.cashsum {
+  position: sticky; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 4;
+  display: grid; grid-template-columns: auto 1fr; grid-template-areas: "label total" "bags total";
+  align-items: center; gap: 0 12px; padding: 12px 16px;
+  border-radius: var(--radius); background: var(--on-brand); color: #fff;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.18);
+}
+.cashsum span { grid-area: label; font-size: 13px; font-weight: 700; opacity: 0.85; }
+.cashsum small { grid-area: bags; color: inherit; opacity: 0.85; }
+.cashtotal { grid-area: total; justify-self: end; font: 700 32px/1.1 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.cashrow {
+  display: grid; align-items: center; gap: 4px 10px; padding: 10px 12px;
+  grid-template-columns: 1fr 52px 48px 84px;
+  grid-template-areas: "coin minus count plus" "coin sub sub sub";
+}
+.cashrow .coin { grid-area: coin; display: flex; flex-direction: column; }
+.cashrow .coin b { font-size: 22px; }
+.cashrow .minus { grid-area: minus; }
+.cashrow .count { grid-area: count; text-align: center; font: 700 24px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.cashrow .plus { grid-area: plus; }
+.cashrow .sub { grid-area: sub; text-align: center; font-weight: 600; }
+.cashrow button {
+  height: 52px; border: 1px solid var(--line); border-radius: 14px; background: var(--raise);
+  font-size: 18px; font-weight: 700;
+}
+.cashrow .plus { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.cashrow button:disabled { opacity: 0.35; }
+@media (prefers-color-scheme: dark) {
+  .cashsum { background: var(--raise); border: 2px solid var(--accent); }
+}

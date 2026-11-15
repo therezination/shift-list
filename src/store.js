@@ -229,6 +229,7 @@ export function normalise(raw, now = new Date()) {
         skipped: { ...raw.ticks.skipped },
         values: { ...raw.ticks.values },
         omit: { ...raw.ticks.omit },
+        cash: { ...raw.ticks.cash },
         arrivals: (raw.ticks.arrivals || []).map((a) => normaliseArrival(a, now)),
       }
       : emptyTicks(dayKey(now)),
@@ -267,7 +268,35 @@ export function normalise(raw, now = new Date()) {
 // done: id -> time ticked. skipped: task id -> true. values: input id -> what was filled in.
 // arrivals: the deliveries that turned up.
 // omit: id -> true for single items left out of today's handover.
-export const emptyTicks = (date) => ({ date, done: {}, skipped: {}, values: {}, arrivals: [], omit: {} });
+// cash: bag id -> how many bags were counted (Cashing up).
+export const emptyTicks = (date) => ({ date, done: {}, skipped: {}, values: {}, arrivals: [], omit: {}, cash: {} });
+
+// Bags of change: [id, coin, value of one full bag in pence]. These are the standard bank bag
+// amounts. Everything is counted in whole pence so the totals never pick up rounding errors.
+export const CASH_BAGS = [
+  ['1p', '1p', 100],
+  ['2p', '2p', 100],
+  ['5p', '5p', 500],
+  ['10p', '10p', 500],
+  ['20p', '20p', 1000],
+  ['50p', '50p', 1000],
+  ['1', '£1', 2000],
+  ['2', '£2', 2000],
+];
+
+export const money = (pence) => (pence / 100).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
+
+export function cashTotals(counts = {}) {
+  const rows = CASH_BAGS.map(([id, coin, bag]) => {
+    const count = Math.max(0, Math.round(Number(counts[id]) || 0));
+    return { id, coin, bag, count, pence: count * bag };
+  });
+  return {
+    rows,
+    bags: rows.reduce((n, r) => n + r.count, 0),
+    pence: rows.reduce((n, r) => n + r.pence, 0),
+  };
+}
 
 export const HISTORY_DAYS = 120;
 

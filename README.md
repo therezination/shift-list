@@ -26,6 +26,8 @@ code, no accounts. It installs to an Android home screen as a web app and works 
 - **Voice memos**: record a note; it is kept on the phone until deleted. With "write down what
   I say" on, the browser's speech recognition transcribes as you speak (in Chrome this sends the
   audio to Google and needs signal). Transcripts can be corrected and added to Mention.
+- **Cashing up** (under More): +1 / −1 for bags of change (1p and 2p bags £1, 5p and 10p £5,
+  20p and 50p £10, £1 and £2 £20) with a running total. Counts clear at 4am.
 - **My notes** (under More): private notes that are kept until deleted and never go into the
   handover, things to mention or history.
 - **How**: opens how.coop.co.uk beside the app (the site cannot be shown inside another page
