@@ -470,3 +470,6 @@ input[type="url"] {
 .memo textarea { resize: none; overflow: hidden; }
 .memohead { align-items: center; }
 .card.line .badge { flex: none; }
+
+.sectionhead { margin: 14px 2px 0; font-size: 18px; }
+.memo .actions { justify-content: flex-start; }

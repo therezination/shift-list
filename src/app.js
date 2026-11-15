@@ -40,7 +40,7 @@ const SPECIAL = [
 // The pages reached from More, with the line shown under each on that page.
 const MORE_PAGES = [
   ['#notes', 'My notes', 'Private notes, never in the handover'],
-  ['#memos', 'Voice memos', 'Record a note by voice, with a transcript'],
+  ['#memos', 'Voice memos', 'Record by voice with a transcript, plus your notes'],
   ['#history', 'History', 'What was done on past days'],
   ['#how', 'How do I', 'Open how.coop.co.uk and your shortcuts'],
   ['#codes', 'Codes', 'Door codes, logins and passwords'],
@@ -748,7 +748,10 @@ function moreView() {
 // mention or the history.
 const fitHeight = (el) => { el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; };
 
-function notesView() {
+const notesView = () => notesBlock();
+
+// The note box and the list of notes. Shown on My notes and under the voice memos.
+function notesBlock() {
   const draft = h('textarea', { rows: 3, maxLength: 5000, placeholder: 'Write a note for yourself', 'aria-label': 'New note' });
   const add = () => {
     const text = draft.value.trim();
@@ -906,6 +909,12 @@ function memoCard(m) {
     h('div', { class: 'actions' },
       btn('Delete', () => withUndo('Memo deleted', () => state.memos.splice(state.memos.indexOf(m), 1)), 'small danger ghost'),
       btn('Copy', () => (m.text.trim() ? copyText(m.text.trim(), 'Transcript copied') : toast('There is no transcript to copy')), 'small outline'),
+      btn('Save to notes', () => {
+        if (!m.text.trim()) return toast('Type or record a transcript first');
+        state.notes.unshift({ id: uid(), text: m.text.trim(), at: Date.now() });
+        commit();
+        toast('Saved to your notes');
+      }, 'small outline'),
       btn('Add to Mention', () => {
         if (!m.text.trim()) return toast('Type or record a transcript first');
         state.mentions.push({ id: uid(), text: m.text.trim(), at: Date.now(), photo: '' });
@@ -916,7 +925,11 @@ function memoCard(m) {
 
 function memosView() {
   if (!canRecord()) {
-    return [h('p', { class: 'empty' }, 'This browser cannot record sound. Open the installed app in Chrome on your phone.')];
+    return [
+      h('p', { class: 'empty' }, 'This browser cannot record sound. Open the installed app in Chrome on your phone.'),
+      h('h2', { class: 'sectionhead' }, 'Notes'),
+      ...notesBlock(),
+    ];
   }
   const toggle = h('input', {
     type: 'checkbox', checked: !!SR && state.settings.transcribe, disabled: !SR || !!rec,
@@ -935,6 +948,8 @@ function memosView() {
     SR && h('p', { class: 'hint' }, 'The recording stays on this phone. The transcript uses your phone\'s speech recognition, which sends what you say to Google while you record, and needs signal. Turn it off to keep everything on the phone.'),
     !state.memos.length && !rec && h('p', { class: 'empty' }, 'No memos yet. Record one and it is kept here until you delete it. You can correct the transcript and add it to things to mention.'),
     ...state.memos.map(memoCard),
+    h('h2', { class: 'sectionhead' }, 'Notes'),
+    ...notesBlock(),
   ];
 }
 
