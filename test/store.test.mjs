@@ -430,3 +430,20 @@ test('the handover is short by default: a tasks-done line, the figures, never th
   assert.match(handoverText(summariseList(s.lists[1], s.ticks, WED), [], '2026-11-11'), /^HANDOVER: PM, /);
   assert.doesNotMatch(write({ parts: { figures: false, deliveries: false } }), /gap scan|Deliveries/);
 });
+
+test('the cashing up total goes into the handover and the history', async () => {
+  const { cashTotals } = await import('../src/store.js');
+  const s = fresh();
+  s.ticks.cash = { '20p': 3, '1': 1 };
+  s.ticks.done[s.lists[0].tasks[0].id] = 1;
+  const sum = summariseList(s.lists[0], s.ticks, WED);
+  const cash = cashTotals(s.ticks.cash);
+  const short = handoverText(sum, [], '2026-11-11', [], at('2026-11-11T13:00:00'), { cash });
+  assert.match(short, /\nCashing up: £50\.00 in 4 bags/);
+  assert.doesNotMatch(handoverText(sum, [], '2026-11-11', [], at('2026-11-11T13:00:00'), { cash, parts: { cash: false } }), /Cashing/);
+  assert.doesNotMatch(handoverText(sum, [], '2026-11-11', [], at('2026-11-11T13:00:00'), { cash: cashTotals({}) }), /Cashing/);
+  const full = handoverText(sum, [], '2026-11-11', [], at('2026-11-11T13:00:00'), { cash, parts: { detailed: true } });
+  assert.match(full, /\nCASHING UP: £50\.00 in 4 bags\n- 20p: 3 × £10\.00 = £30\.00\n- £1: 1 × £20\.00 = £20\.00\n/);
+  rollover(s, at('2026-11-12T08:00:00'));
+  assert.deepEqual([s.history[0].cash.pence, s.history[0].cash.bags], [5000, 4]);
+});

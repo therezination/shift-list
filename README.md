@@ -21,7 +21,7 @@ code, no accounts. It installs to an Android home screen as a web app and works 
 - **Handover** is short by default: "AM tasks done", the numbers filled in (gaps, orders),
   deliveries, text boxes and things to mention, with no not-done list. **What to include** has a
   tickbox for each part and each single item, and a "Detailed write-up" option for the full
-  task lists.
+  task lists. The cashing up total is included when any bags are counted.
 - The bottom bar has five places: Checklist (switch lists at the top), Deliveries, Mention,
   Handover and More (Voice memos, History, How do I, Codes).
 - **Voice memos**: record a note; it is kept on the phone until deleted. With "write down what

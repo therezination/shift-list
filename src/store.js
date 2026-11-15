@@ -377,12 +377,17 @@ export function snapshot(state) {
     lists: state.lists.map((l) => summariseList(l, state.ticks, wd)).filter((l) => l.total + l.skipped.length > 0),
     mentions: state.mentions.map((m) => ({ text: m.text, at: hhmm(m.at), photo: m.photo || '' })),
     deliveries: summariseDeliveries(state.deliveries, state.ticks, wd),
+    cash: cashTotals(state.ticks.cash),
   };
 }
 
+// "£109.00 in 14 bags"
+export const cashLine = (c) => `${money(c.pence)} in ${c.bags} bag${c.bags === 1 ? '' : 's'}`;
+
 const worthKeeping = (snap) => snap.mentions.length > 0
   || snap.lists.some((l) => l.done.length > 0 || l.figures.length > 0 || l.notes.length > 0)
-  || snap.deliveries.some((d) => d.at);
+  || snap.deliveries.some((d) => d.at)
+  || snap.cash.bags > 0;
 
 // The handover write-up for one list, as plain text ready to paste or send. Short capital
 // headings and one fact per line, so it reads at a glance in a message. What still needs
@@ -398,6 +403,7 @@ export const HANDOVER_PARTS = [
   ['times', 'Times on done tasks', 'full'],
   ['skipped', 'Skipped today', 'full'],
   ['deliveries', 'Deliveries'],
+  ['cash', 'Cashing up'],
   ['notes', 'Text boxes (adjustments and the like)'],
   ['mentions', 'Things to mention'],
   ['photos', 'Photos (with Share)'],
@@ -426,7 +432,7 @@ function deliveryShort(d) {
 }
 
 // The short handover: a line for the tasks, then only what the next shift needs to know.
-function compactHandover(summary, mentions, dateKey, deliveries, now, on, kept) {
+function compactHandover(summary, mentions, dateKey, deliveries, now, on, kept, cash) {
   const shift = shiftName(summary.name);
   const lines = [`HANDOVER: ${shift}, ${prettyDate(dateKey)}, ${nowHHMM(now)}`, ''];
   if (on('summary') && summary.total) {
@@ -436,6 +442,7 @@ function compactHandover(summary, mentions, dateKey, deliveries, now, on, kept) 
   if (on('figures')) for (const f of kept(summary.figures || [])) lines.push(`${f.title}: ${figureText(f)}`);
   const dels = on('deliveries') ? kept(deliveries) : [];
   if (dels.length) lines.push(`Deliveries: ${dels.map(deliveryShort).join('; ')}`);
+  if (on('cash') && cash && cash.bags) lines.push(`Cashing up: ${cashLine(cash)}`);
   if (on('notes')) {
     for (const n of kept(summary.notes || [])) {
       lines.push(`${n.label}: ${n.text.split('\n').map((l) => l.trim()).filter(Boolean).join('; ')}`);
@@ -457,7 +464,7 @@ export function handoverText(summary, mentions, dateKey, deliveries = [], now = 
   const omit = opts.omit || {};
   const on = (key) => handoverPartOn(parts, key);
   const kept = (rows) => rows.filter((r) => !omit[r.id]);
-  if (!on('detailed')) return compactHandover(summary, mentions, dateKey, deliveries, now, on, kept);
+  if (!on('detailed')) return compactHandover(summary, mentions, dateKey, deliveries, now, on, kept, opts.cash);
   const lines = [];
   const section = (title, rows) => {
     if (!rows.length) return;
@@ -504,6 +511,10 @@ export function handoverText(summary, mentions, dateKey, deliveries = [], now = 
   }
   if (on('deliveries')) {
     section('DELIVERIES', kept(deliveries).map((d) => `- ${d.name}${d.time ? ` (due ${d.time})` : ''}: ${deliveryStatus(d)}`));
+  }
+  if (on('cash') && opts.cash && opts.cash.bags) {
+    section(`CASHING UP: ${cashLine(opts.cash)}`, opts.cash.rows.filter((r) => r.count)
+      .map((r) => `- ${r.coin}: ${r.count} × ${money(r.bag)} = ${money(r.pence)}`));
   }
   if (on('notes')) {
     for (const n of kept(notes)) section(n.label.toUpperCase(), n.text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => `- ${l}`));

@@ -1182,7 +1182,7 @@ function handoverView() {
   const summary = summariseList(list, state.ticks, weekday());
   const deliveries = summariseDeliveries(state.deliveries, state.ticks, weekday());
   const text = handoverText(summary, state.mentions, state.ticks.date, deliveries, new Date(),
-    { parts: state.settings.handover, omit: state.ticks.omit });
+    { parts: state.settings.handover, omit: state.ticks.omit, cash: cashTotals(state.ticks.cash) });
   const area = h('textarea', { class: 'handover', rows: 6, value: text, 'aria-label': 'Handover text', oninput: (e) => fitHeight(e.target) });
   setTimeout(() => fitHeight(area));
   const pics = handoverPhotos();
@@ -1215,6 +1215,10 @@ function dayBlock(snap, label, open) {
         h('span', { class: 'grow' }, f.title), h('small', {}, f.items.map((i) => `${i.label} ${i.value}`).join(', '))))),
       (l.notes || []).map((n) => [h('h3', {}, n.label), h('p', { class: 'note' }, n.text)]),
     ]),
+    snap.cash && snap.cash.bags > 0 && [
+      h('h3', {}, 'Cashing up'),
+      h('ul', { class: 'log' }, h('li', {}, h('span', { class: 'grow' }, money(snap.cash.pence)), h('small', {}, `${snap.cash.bags} bag${snap.cash.bags === 1 ? '' : 's'}`))),
+    ],
     (snap.deliveries || []).length > 0 && [
       h('h3', {}, 'Deliveries'),
       h('ul', { class: 'log' }, snap.deliveries.map((d) => h('li', { class: d.at ? 'ok' : 'miss' },
