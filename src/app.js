@@ -1151,7 +1151,7 @@ function handoverPicker(summary, deliveries) {
     h('input', { type: 'checkbox', checked, onchange: (e) => { onchange(e.target.checked); persist(); render(); } }),
     h('span', {}, label));
 
-  const rows = HANDOVER_PARTS.filter(([, , full]) => !full || partOn('detailed')).map(([key, label]) => {
+  const rows = HANDOVER_PARTS.filter(([, , only]) => !only || (only === 'full') === partOn('detailed')).map(([key, label]) => {
     const list = items[key] || [];
     const left = list.filter(([id]) => !omit[id]).length;
     const open = pickOpen.has(key);
@@ -1170,7 +1170,7 @@ function handoverPicker(summary, deliveries) {
   return h('div', { class: 'card picker' },
     h('button', { type: 'button', class: 'pickhead', 'aria-expanded': String(pickerOpen), onclick: () => { pickerOpen = !pickerOpen; render(); } },
       h('span', { class: 'title' }, 'What to include'),
-      h('small', {}, `${partOn('detailed') ? 'Detailed' : 'Short'}${changed ? ', changed' : ''}`),
+      h('small', {}, `${partOn('detailed') ? 'Detailed' : partOn('condense') ? 'Condensed' : 'Short'}${changed ? ', changed' : ''}`),
       h('span', { class: 'chev', 'aria-hidden': 'true' }, pickerOpen ? '▾' : '▸')),
     pickerOpen && h('div', { class: 'pickbody' }, rows,
       changed && btn('Back to the usual', () => { state.settings.handover = {}; state.ticks.omit = {}; persist(); render(); }, 'small outline')));
@@ -1196,7 +1196,7 @@ function handoverView() {
     h('div', { class: 'actions' },
       navigator.share && btn(pics.length ? `Share with ${pics.length} photo${pics.length > 1 ? 's' : ''}` : 'Share', () => shareHandover(area.value)),
       btn('Copy text', () => copyText(area.value, 'Handover copied'), 'primary')),
-    h('p', { class: 'hint' }, 'Short by default. Tick "Detailed write-up" under "What to include" for the full task lists. Set the ticks first, then change any wording in the box: changing a tick rewrites the text. Which parts are included is remembered; single items you untick come back tomorrow.'),
+    h('p', { class: 'hint' }, 'Short by default. Under "What to include", tick "Condensed" for a shorter one or "Detailed write-up" for the full task lists. Set the ticks first, then change any wording in the box: changing a tick rewrites the text. Which parts are included is remembered; single items you untick come back tomorrow.'),
   ];
 }
 

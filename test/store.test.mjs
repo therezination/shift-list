@@ -447,3 +447,37 @@ test('the cashing up total goes into the handover and the history', async () => 
   rollover(s, at('2026-11-12T08:00:00'));
   assert.deepEqual([s.history[0].cash.pence, s.history[0].cash.bags], [5000, 4]);
 });
+
+test('condensed handover: tasks as Done, mentions cut to one short line', async () => {
+  const { shortMention } = await import('../src/store.js');
+  assert.equal(shortMention('Freezer door sticks. Engineer booked for Tuesday.'), 'Freezer door sticks');
+  assert.equal(shortMention('First line\nsecond line'), 'First line');
+  assert.equal(shortMention('Price 1.50 is wrong on the shelf edge label'), 'Price 1.50 is wrong on the shelf edge label');
+  const long = shortMention('The delivery came in with three cages short and one of them had a broken wheel on it');
+  assert.ok(long.length <= 60 && long.endsWith('…') && !/\s…$/.test(long), long);
+  assert.equal(shortMention('Bins e.g. paper and card need sorting today'), 'Bins e.g. paper and card need sorting today');
+  assert.equal(shortMention('Ask Dr. Jones about it. Then file it.'), 'Ask Dr. Jones about it');
+  assert.equal(shortMention('Is the chiller on? Yes it is.'), 'Is the chiller on?');
+  assert.equal(shortMention('...'), '...');
+  assert.equal(shortMention('   '), '');
+  const emoji = shortMention(`${'a'.repeat(58)}\u{1F600}\u{1F600} rest`);
+  assert.ok(!/[\uD800-\uDBFF]…$/.test(emoji) && Array.from(emoji).length <= 60, emoji);
+
+  const s = fresh();
+  const list = s.lists[0];
+  s.ticks.done[list.tasks[0].id] = 1; // only one task done: still "Done" when condensed
+  const gap = task(list, 'AM gap scan');
+  s.ticks.values[gap.inputs[0].id] = '40';
+  const mentions = [{ id: 'a', text: 'Short on milk. Ordered more.' }, { id: 'b', text: 'Cage left by the door', photo: 'p' }];
+  const text = handoverText(summariseList(list, s.ticks, WED), mentions, '2026-11-11', [], at('2026-11-11T13:58:00'), { parts: { condense: true } });
+  assert.equal(text, [
+    'HANDOVER: AM, Wed 11 Nov, 13:58',
+    '',
+    'AM tasks: Done',
+    'AM gap scan: 40',
+    'To mention: Short on milk; Cage left by the door (photo)',
+  ].join('\n'));
+  // off by default, and the detailed write-up ignores it
+  assert.doesNotMatch(handoverText(summariseList(list, s.ticks, WED), mentions, '2026-11-11'), /tasks: Done/);
+  assert.match(handoverText(summariseList(list, s.ticks, WED), mentions, '2026-11-11', [], at('2026-11-11T13:58:00'), { parts: { condense: true, detailed: true } }), /THINGS TO MENTION\n- Short on milk\. Ordered more\./);
+});

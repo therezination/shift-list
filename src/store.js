@@ -392,10 +392,11 @@ const worthKeeping = (snap) => snap.mentions.length > 0
 // The handover write-up for one list, as plain text ready to paste or send. Short capital
 // headings and one fact per line, so it reads at a glance in a message. What still needs
 // doing comes first, because that is what the next shift acts on.
-// The parts of the handover that can be switched on or off. `full` marks parts that only exist
-// in the detailed write-up.
+// The parts of the handover that can be switched on or off. The third field says which write-up
+// a part belongs to: 'full' only in the detailed one, 'short' only in the short one.
 export const HANDOVER_PARTS = [
   ['detailed', 'Detailed write-up (task lists)'],
+  ['condense', 'Condensed: tasks as "Done", short mentions', 'short'],
   ['summary', 'Tasks done line'],
   ['figures', 'Numbers and counts'],
   ['notDone', 'Not done', 'full'],
@@ -411,7 +412,7 @@ export const HANDOVER_PARTS = [
 
 // Parts that are off until switched on: the handover is short by default and never lists
 // what was not done unless asked to.
-const PART_DEFAULT_OFF = { detailed: true, notDone: true };
+const PART_DEFAULT_OFF = { detailed: true, notDone: true, condense: true };
 export const handoverPartOn = (parts = {}, key) => (key in parts ? parts[key] !== false : !PART_DEFAULT_OFF[key]);
 
 // "Morning" -> "AM", "Evening" -> "PM", anything else as it is.
@@ -425,6 +426,29 @@ function figureText(f) {
   return f.items.map((i) => `${i.value} ${(shared ? i.label.slice(i.label.indexOf(' ') + 1) : i.label).toLowerCase()}`).join(', ');
 }
 
+// A thing to mention cut down for the condensed handover: its first line and first sentence,
+// at most `max` characters, ending at a word with "…" when it had to be cut. A sentence ends at
+// . ! or ? followed by a space and a capital letter, so "e.g. paper" and "1.50" do not end it;
+// common abbreviations before a capital ("Dr. Smith") do not either. Questions keep their "?".
+// Counts characters, not UTF-16 units, so an emoji is never cut in half.
+const ABBREV = /(?:^|\s)(?:dr|mr|mrs|ms|st|no|approx|etc|e\.g|i\.e|vs)\.$/i;
+
+export function shortMention(text, max = 60) {
+  const line = String(text).trim().split('\n')[0].trim();
+  let s = line;
+  const ends = /[.!?]+(?=\s+\p{Lu})/gu;
+  for (let m = ends.exec(line); m; m = ends.exec(line)) {
+    const head = line.slice(0, m.index + m[0].length);
+    if (!ABBREV.test(head)) { s = head; break; }
+  }
+  s = s.replace(/[.!]+$/, '').trim() || line;
+  const chars = Array.from(s);
+  if (chars.length <= max) return s;
+  const cut = chars.slice(0, max - 1).join('');
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:-]+$/, '')}…`;
+}
+
 // "Chilled 06:42, 4 cages, temps done" / "Bread (due 07:15) not in yet"
 function deliveryShort(d) {
   if (!d.at) return `${d.name}${d.time ? ` (due ${d.time})` : ''} not in yet`;
@@ -435,9 +459,11 @@ function deliveryShort(d) {
 function compactHandover(summary, mentions, dateKey, deliveries, now, on, kept, cash) {
   const shift = shiftName(summary.name);
   const lines = [`HANDOVER: ${shift}, ${prettyDate(dateKey)}, ${nowHHMM(now)}`, ''];
+  const condense = on('condense');
   if (on('summary') && summary.total) {
     const all = summary.done.length === summary.total;
-    lines.push(all ? `${shift} tasks done` : `${shift} tasks done: ${summary.done.length} of ${summary.total}`);
+    if (condense) lines.push(`${shift} tasks: Done`);
+    else lines.push(all ? `${shift} tasks done` : `${shift} tasks done: ${summary.done.length} of ${summary.total}`);
   }
   if (on('figures')) for (const f of kept(summary.figures || [])) lines.push(`${f.title}: ${figureText(f)}`);
   const dels = on('deliveries') ? kept(deliveries) : [];
@@ -450,7 +476,10 @@ function compactHandover(summary, mentions, dateKey, deliveries, now, on, kept, 
   }
   if (on('mentions')) {
     const rows = kept(mentions);
-    if (rows.length) lines.push('', 'To mention:', ...rows.map((m) => `- ${m.text}${m.photo && on('photos') ? ' (photo)' : ''}`));
+    const tag = (m) => (m.photo && on('photos') ? ' (photo)' : '');
+    const shortRows = rows.map((m) => `${shortMention(m.text)}${tag(m)}`.trim()).filter(Boolean);
+    if (shortRows.length && condense) lines.push(`To mention: ${shortRows.join('; ')}`);
+    else if (rows.length && !condense) lines.push('', 'To mention:', ...rows.map((m) => `- ${m.text}${tag(m)}`));
   }
   while (lines.at(-1) === '') lines.pop();
   return lines.join('\n');
